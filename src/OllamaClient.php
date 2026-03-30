@@ -96,7 +96,7 @@ class OllamaClient
 
     private function http(): PendingRequest
     {
-        return Http::baseUrl(rtrim((string) config('ges-ocr.ollama.base_url'), '/'))
+        $request = Http::baseUrl(rtrim((string) config('ges-ocr.ollama.base_url'), '/'))
             ->acceptJson()
             ->asJson()
             ->connectTimeout((int) config('ges-ocr.ollama.connect_timeout', 10))
@@ -105,6 +105,15 @@ class OllamaClient
                 (int) config('ges-ocr.ollama.retry_times', 2),
                 (int) config('ges-ocr.ollama.retry_sleep_ms', 500)
             );
+
+        if ((bool) config('ges-ocr.ollama.basic_auth.enabled', false)) {
+            $request = $request->withBasicAuth(
+                (string) config('ges-ocr.ollama.basic_auth.username', ''),
+                (string) config('ges-ocr.ollama.basic_auth.password', '')
+            );
+        }
+
+        return $request;
     }
 
     /**

@@ -114,6 +114,9 @@ OLLAMA_RETRY_TIMES=2
 OLLAMA_RETRY_SLEEP_MS=500
 OLLAMA_CLASSIFICATION_CONFIDENCE_THRESHOLD=0.75
 OLLAMA_MAX_PAGES=0
+OLLAMA_BASIC_AUTH_ENABLED=false
+OLLAMA_BASIC_AUTH_USERNAME=
+OLLAMA_BASIC_AUTH_PASSWORD=
 GES_OCR_MRZ_OCR_ENABLED=true
 GES_OCR_CLEANUP_TEMPORARY_FILES=true
 ```
@@ -124,6 +127,11 @@ Main config areas:
 - `ollama`
 - `mrz`
 - `processing`
+
+Optional Ollama upstream basic auth:
+- `OLLAMA_BASIC_AUTH_ENABLED=true` enables HTTP basic auth on requests sent to `OLLAMA_BASE_URL`
+- `OLLAMA_BASIC_AUTH_USERNAME` sets the upstream username
+- `OLLAMA_BASIC_AUTH_PASSWORD` sets the upstream password
 
 ## Public API
 

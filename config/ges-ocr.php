@@ -11,6 +11,11 @@ return [
         'retry_sleep_ms' => (int) env('OLLAMA_RETRY_SLEEP_MS', 500),
         'classification_confidence_threshold' => (float) env('OLLAMA_CLASSIFICATION_CONFIDENCE_THRESHOLD', 0.75),
         'max_pages' => (int) env('OLLAMA_MAX_PAGES', 0),
+        'basic_auth' => [
+            'enabled' => filter_var(env('OLLAMA_BASIC_AUTH_ENABLED', false), FILTER_VALIDATE_BOOL),
+            'username' => env('OLLAMA_BASIC_AUTH_USERNAME'),
+            'password' => env('OLLAMA_BASIC_AUTH_PASSWORD'),
+        ],
     ],
     'mrz' => [
         'ocr_enabled' => filter_var(env('GES_OCR_MRZ_OCR_ENABLED', true), FILTER_VALIDATE_BOOL),

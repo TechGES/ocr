@@ -125,7 +125,7 @@ class DocumentNormalizationService
         }
 
         $nationality = $this->normalizeNationality($this->firstStringValue($payload, ['nationality', 'nationalite']));
-        if ($nationality === '' && $parsedMrz['nationality'] !== '') {
+        if ($parsedMrz['nationality'] !== '' && ($nationality === '' || $nationality !== $parsedMrz['nationality'])) {
             $nationality = $parsedMrz['nationality'];
         }
 

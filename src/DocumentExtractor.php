@@ -108,6 +108,8 @@ class DocumentExtractor
                 "Si une zone NOM/Prénoms, SURNAMES/FORENAMES ou MRZ montre un nom de famille en majuscules suivi d un prenom sur la ligne suivante, mets les majuscules dans last_name et le prenom dans first_name.\n".
                 "Si une date de naissance est visible sur le document, retourne-la obligatoirement dans date_of_birth.\n".
                 "Pour les titres de sejour, dans une ligne comme 'M MAR 06 04 1989', 'M' correspond au sexe, 'MAR' a la nationalite marocaine, et la date de naissance est '06 04 1989', donc retourne 1989-04-06.\n".
+                "Pour les titres de sejour francais, nationality est la nationalite du titulaire, pas le pays emetteur FRA.\n".
+                "Si la MRZ ou la ligne d etat civil indique 'MAR', retourne nationality='MAR', pas 'FRA'.\n".
                 "Ne traite jamais un code de nationalite comme un mois.\n".
                 "Si la date est ecrite en chiffres separes comme '06 04 1989', interprete-la comme jour mois annee.\n".
                 "Si une MRZ est visible, utilise-la pour completer ou corriger date_of_birth, expiry_date, first_name, last_name, sex et nationality lorsque ces champs sont lisibles.\n".

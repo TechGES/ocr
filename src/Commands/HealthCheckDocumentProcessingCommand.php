@@ -2,7 +2,7 @@
 
 namespace Ges\Ocr\Commands;
 
-use Ges\Ocr\OllamaClient;
+use Ges\Ocr\Contracts\LlmClient;
 use Illuminate\Console\Command;
 use RuntimeException;
 
@@ -10,10 +10,10 @@ class HealthCheckDocumentProcessingCommand extends Command
 {
     protected $signature = 'ocr:health';
 
-    protected $description = 'Check OCR package dependencies, configuration, and Ollama connectivity.';
+    protected $description = 'Check OCR package dependencies, configuration, and AI provider connectivity.';
 
     public function __construct(
-        protected OllamaClient $ollamaClient
+        protected LlmClient $llmClient
     ) {
         parent::__construct();
     }
@@ -26,19 +26,20 @@ class HealthCheckDocumentProcessingCommand extends Command
         $this->reportBinary('pdftoppm');
 
         try {
-            $health = $this->ollamaClient->healthCheck();
+            $health = $this->llmClient->healthCheck();
         } catch (RuntimeException $exception) {
-            $this->components->error('Ollama check failed: '.$exception->getMessage());
+            $this->components->error(ucfirst((string) config('ges-ocr.ai.provider', 'ai')).' check failed: '.$exception->getMessage());
 
             return self::FAILURE;
         }
 
         $availableModels = array_map(
-            static fn (array $model): string => (string) ($model['name'] ?? ''),
+            static fn (array $model): string => (string) ($model['name'] ?? $model['id'] ?? ''),
             is_array($health['available_models']) ? $health['available_models'] : []
         );
 
-        $this->components->info('Ollama base URL: '.$health['base_url']);
+        $this->components->info('AI provider: '.($health['provider'] ?? config('ges-ocr.ai.provider')));
+        $this->components->info('Base URL: '.$health['base_url']);
         $this->components->info('Text model: '.$health['text_model']);
         $this->components->info('Vision model: '.$health['vision_model']);
         $this->components->info('Available models: '.implode(', ', array_filter($availableModels)));

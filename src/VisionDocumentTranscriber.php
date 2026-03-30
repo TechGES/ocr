@@ -2,10 +2,13 @@
 
 namespace Ges\Ocr;
 
+use Ges\Ocr\Contracts\LlmClient;
+use Ges\Ocr\Support\LlmConfig;
+
 class VisionDocumentTranscriber
 {
     public function __construct(
-        protected OllamaClient $ollamaClient
+        protected LlmClient $llmClient
     ) {}
 
     /**
@@ -38,8 +41,8 @@ class VisionDocumentTranscriber
 
     private function transcribeImage(string $imagePath, int $pageNumber): string
     {
-        return $this->ollamaClient->chatText(
-            (string) config('ges-ocr.ollama.vision_model'),
+        return $this->llmClient->chatText(
+            LlmConfig::visionModel(),
             [[
                 'role' => 'user',
                 'content' => "Tu es un agent OCR specialise dans la lecture de cartes d identite, titres de sejour, passeports, visas et autres documents d identite.\n".
@@ -54,15 +57,15 @@ class VisionDocumentTranscriber
                     "Exemple: si la MRZ contient 'EL<ARRIM<<WADIE', retourne exactement 'EL<ARRIM<<WADIE'.\n".
                     "N ajoute aucune explication, aucun resume et n invente rien.\n".
                     'Si un element est illisible, omets-le plutot que de l inventer.',
-                'images' => [base64_encode((string) file_get_contents($imagePath))],
+                'images' => [$this->encodeImage($imagePath)],
             ]]
         );
     }
 
     private function extractMrzFromImage(string $imagePath, int $pageNumber): string
     {
-        return $this->ollamaClient->chatText(
-            (string) config('ges-ocr.ollama.vision_model'),
+        return $this->llmClient->chatText(
+            LlmConfig::visionModel(),
             [[
                 'role' => 'user',
                 'content' => "Tu es un agent OCR specialise uniquement dans la lecture de MRZ sur des documents d identite.\n".
@@ -73,8 +76,19 @@ class VisionDocumentTranscriber
                     "Conserve strictement les caracteres '<' et les separateurs '<<'.\n".
                     "Conserve toutes les lignes MRZ dans le bon ordre, sans les reformuler, sans les compacter et sans ajouter d explication.\n".
                     "N ajoute aucun autre texte que la MRZ brute.",
-                'images' => [base64_encode((string) file_get_contents($imagePath))],
+                'images' => [$this->encodeImage($imagePath)],
             ]]
         );
+    }
+
+    /**
+     * @return array{data: string, mime_type: string}
+     */
+    private function encodeImage(string $imagePath): array
+    {
+        return [
+            'data' => base64_encode((string) file_get_contents($imagePath)),
+            'mime_type' => mime_content_type($imagePath) ?: 'application/octet-stream',
+        ];
     }
 }

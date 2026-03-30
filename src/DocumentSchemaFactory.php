@@ -146,6 +146,24 @@ class DocumentSchemaFactory
     /**
      * @return array<string, mixed>
      */
+    public function analysisSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'document_type' => $this->classificationSchema()['properties']['document_type'],
+                'confidence' => $this->classificationSchema()['properties']['confidence'],
+                'review_reason' => $this->classificationSchema()['properties']['review_reason'],
+                'extracted_data' => $this->combinedExtractionSchema(),
+            ],
+            'required' => ['document_type', 'confidence', 'review_reason', 'extracted_data'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function identityDocumentSchema(string $documentType): array
     {
         return [
@@ -166,6 +184,123 @@ class DocumentSchemaFactory
                 'city' => ['type' => 'string'],
             ],
             'required' => ['document_type', 'first_name', 'last_name', 'date_of_birth', 'place_of_birth', 'document_number', 'expiry_date', 'nationality', 'sex', 'mrz', 'street_address', 'postal_code', 'city'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function combinedExtractionSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'document_type' => $this->classificationSchema()['properties']['document_type'],
+                'first_name' => ['type' => 'string'],
+                'last_name' => ['type' => 'string'],
+                'date_of_birth' => ['type' => 'string'],
+                'place_of_birth' => ['type' => 'string'],
+                'document_number' => ['type' => 'string'],
+                'expiry_date' => ['type' => 'string'],
+                'nationality' => ['type' => 'string'],
+                'sex' => ['type' => 'string'],
+                'mrz' => ['type' => 'string'],
+                'street_address' => ['type' => 'string'],
+                'postal_code' => ['type' => 'string'],
+                'city' => ['type' => 'string'],
+                'company_name' => ['type' => 'string'],
+                'trade_name' => ['type' => 'string'],
+                'legal_form' => ['type' => 'string'],
+                'capital' => ['type' => 'string'],
+                'registration_number' => ['type' => 'string'],
+                'siret' => ['type' => 'string'],
+                'sirene' => ['type' => 'string'],
+                'naf_code' => ['type' => 'string'],
+                'registration_date' => ['type' => 'string'],
+                'registry_city' => ['type' => 'string'],
+                'legal_representatives' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'entity_type' => ['type' => 'string', 'enum' => ['person', 'company']],
+                            'company_name' => ['type' => 'string'],
+                            'legal_form' => ['type' => 'string'],
+                            'civility' => ['type' => 'string'],
+                            'first_name' => ['type' => 'string'],
+                            'last_name' => ['type' => 'string'],
+                            'street_address' => ['type' => 'string'],
+                            'postal_code' => ['type' => 'string'],
+                            'city' => ['type' => 'string'],
+                            'registration_number' => ['type' => 'string'],
+                            'registry_city' => ['type' => 'string'],
+                            'role' => ['type' => 'string'],
+                        ],
+                        'required' => ['entity_type', 'company_name', 'legal_form', 'civility', 'first_name', 'last_name', 'street_address', 'postal_code', 'city', 'registration_number', 'registry_city', 'role'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+                'cadastral_parcels' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'prefixe' => ['type' => 'string'],
+                            'section' => ['type' => 'string'],
+                            'numero' => ['type' => 'string'],
+                            'street_address' => ['type' => 'string'],
+                            'postal_code' => ['type' => 'string'],
+                            'city' => ['type' => 'string'],
+                        ],
+                        'required' => ['prefixe', 'section', 'numero', 'street_address', 'postal_code', 'city'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+                'owners' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'entity_type' => ['type' => 'string', 'enum' => ['person', 'company']],
+                            'company_name' => ['type' => 'string'],
+                            'civility' => ['type' => 'string'],
+                            'first_name' => ['type' => 'string'],
+                            'last_name' => ['type' => 'string'],
+                        ],
+                        'required' => ['entity_type', 'company_name', 'civility', 'first_name', 'last_name'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => [
+                'document_type',
+                'first_name',
+                'last_name',
+                'date_of_birth',
+                'place_of_birth',
+                'document_number',
+                'expiry_date',
+                'nationality',
+                'sex',
+                'mrz',
+                'street_address',
+                'postal_code',
+                'city',
+                'company_name',
+                'trade_name',
+                'legal_form',
+                'capital',
+                'registration_number',
+                'siret',
+                'sirene',
+                'naf_code',
+                'registration_date',
+                'registry_city',
+                'legal_representatives',
+                'cadastral_parcels',
+                'owners',
+            ],
             'additionalProperties' => false,
         ];
     }

@@ -2,11 +2,12 @@
 
 namespace Ges\Ocr;
 
+use Ges\Ocr\Contracts\LlmClient;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
-class OllamaClient
+class OllamaClient implements LlmClient
 {
     /**
      * @param  array<int, array<string, mixed>>  $messages
@@ -87,6 +88,7 @@ class OllamaClient
         }
 
         return [
+            'provider' => 'ollama',
             'base_url' => config('ges-ocr.ollama.base_url'),
             'text_model' => config('ges-ocr.ollama.text_model'),
             'vision_model' => config('ges-ocr.ollama.vision_model'),
@@ -122,6 +124,10 @@ class OllamaClient
      */
     private function sanitizeForJson(mixed $value): mixed
     {
+        if (is_array($value) && array_key_exists('data', $value)) {
+            return $value['data'];
+        }
+
         if (is_array($value)) {
             $sanitized = [];
 

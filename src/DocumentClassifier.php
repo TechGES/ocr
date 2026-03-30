@@ -2,10 +2,13 @@
 
 namespace Ges\Ocr;
 
+use Ges\Ocr\Contracts\LlmClient;
+use Ges\Ocr\Support\LlmConfig;
+
 class DocumentClassifier
 {
     public function __construct(
-        protected OllamaClient $ollamaClient,
+        protected LlmClient $llmClient,
         protected DocumentSchemaFactory $schemaFactory
     ) {}
 
@@ -14,8 +17,8 @@ class DocumentClassifier
      */
     public function classifyText(string $text): array
     {
-        $payload = $this->ollamaClient->chatStructured(
-            (string) config('ges-ocr.ollama.text_model'),
+        $payload = $this->llmClient->chatStructured(
+            LlmConfig::textModel(),
             [[
                 'role' => 'user',
                 'content' => $this->buildTextPrompt($text),
@@ -32,8 +35,8 @@ class DocumentClassifier
      */
     public function classifyImages(array $imagePaths): array
     {
-        $payload = $this->ollamaClient->chatStructured(
-            (string) config('ges-ocr.ollama.vision_model'),
+        $payload = $this->llmClient->chatStructured(
+            LlmConfig::visionModel(),
             [[
                 'role' => 'user',
                 'content' => $this->classificationInstructions(),
@@ -88,12 +91,15 @@ class DocumentClassifier
 
     /**
      * @param  array<int, string>  $imagePaths
-     * @return array<int, string>
+     * @return array<int, array{data: string, mime_type: string}>
      */
     private function encodeImages(array $imagePaths): array
     {
         return array_map(
-            static fn (string $imagePath): string => base64_encode((string) file_get_contents($imagePath)),
+            static fn (string $imagePath): array => [
+                'data' => base64_encode((string) file_get_contents($imagePath)),
+                'mime_type' => mime_content_type($imagePath) ?: 'application/octet-stream',
+            ],
             $imagePaths
         );
     }

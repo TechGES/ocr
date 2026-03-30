@@ -2,12 +2,14 @@
 
 namespace Ges\Ocr;
 
+use Ges\Ocr\Contracts\LlmClient;
 use Ges\Ocr\Support\DocumentProcessingValues;
+use Ges\Ocr\Support\LlmConfig;
 
 class DocumentExtractor
 {
     public function __construct(
-        protected OllamaClient $ollamaClient,
+        protected LlmClient $llmClient,
         protected DocumentSchemaFactory $schemaFactory
     ) {}
 
@@ -16,8 +18,8 @@ class DocumentExtractor
      */
     public function extractFromText(string $documentType, string $text): array
     {
-        return $this->ollamaClient->chatStructured(
-            (string) config('ges-ocr.ollama.text_model'),
+        return $this->llmClient->chatStructured(
+            LlmConfig::textModel(),
             [[
                 'role' => 'user',
                 'content' => $this->buildTextPrompt($documentType, $text),
@@ -32,8 +34,8 @@ class DocumentExtractor
      */
     public function extractFromImages(string $documentType, array $imagePaths): array
     {
-        return $this->ollamaClient->chatStructured(
-            (string) config('ges-ocr.ollama.vision_model'),
+        return $this->llmClient->chatStructured(
+            LlmConfig::visionModel(),
             [[
                 'role' => 'user',
                 'content' => $this->buildImagePrompt($documentType),
@@ -173,12 +175,15 @@ class DocumentExtractor
 
     /**
      * @param  array<int, string>  $imagePaths
-     * @return array<int, string>
+     * @return array<int, array{data: string, mime_type: string}>
      */
     private function encodeImages(array $imagePaths): array
     {
         return array_map(
-            static fn (string $imagePath): string => base64_encode((string) file_get_contents($imagePath)),
+            static fn (string $imagePath): array => [
+                'data' => base64_encode((string) file_get_contents($imagePath)),
+                'mime_type' => mime_content_type($imagePath) ?: 'application/octet-stream',
+            ],
             $imagePaths
         );
     }

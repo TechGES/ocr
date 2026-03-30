@@ -5,6 +5,7 @@ namespace Ges\Ocr;
 use Ges\Ocr\Data\ProcessedDocumentResult;
 use Ges\Ocr\Data\ProcessingSource;
 use Ges\Ocr\Support\DocumentProcessingValues;
+use Ges\Ocr\Support\LlmConfig;
 use RuntimeException;
 
 class DocumentProcessor
@@ -15,6 +16,7 @@ class DocumentProcessor
         protected VisionDocumentTranscriber $visionDocumentTranscriber,
         protected DocumentClassifier $documentClassifier,
         protected DocumentExtractor $documentExtractor,
+        protected OpenAiDocumentAnalyzer $openAiDocumentAnalyzer,
         protected DocumentNormalizationService $normalizationService,
         protected MrzProcessor $mrzProcessor,
     ) {}
@@ -34,7 +36,7 @@ class DocumentProcessor
             throw new RuntimeException('The source file could not be found.');
         }
 
-        $temporaryImageDirectory = storage_path('app/tmp/document-processing/'.($source->processingId ?? 'direct').'-'.uniqid());
+        $temporaryImageDirectory = storage_path('app/tmp/document-processing/'.($source->processingId ?? 'direct').'-'.uniqid('', true));
         $pageImages = [];
         $maxPages = $this->configuredMaxPages();
 
@@ -60,30 +62,42 @@ class DocumentProcessor
                 in_array($detection['input_type'], [DocumentProcessingValues::INPUT_TYPE_IMAGE, DocumentProcessingValues::INPUT_TYPE_PDF_SCAN], true)
                 && $pageImages !== []
             ) {
+                if (LlmConfig::provider() === 'openai') {
+                    $analysis = $this->openAiDocumentAnalyzer->analyzeImages($pageImages);
+                    $classification = $analysis['classification'];
+                    $extraction = $analysis['extraction'];
+
+                    return $this->buildProcessedResult(
+                        source: $source,
+                        detectionInputType: $detection['input_type'],
+                        pageCount: $pageCount,
+                        classification: $classification,
+                        extraction: $extraction
+                    );
+                }
+
                 $extractedText = $this->visionDocumentTranscriber->transcribeImages($pageImages);
             }
 
-            $classification = $this->documentClassifier->classifyText((string) $extractedText);
+            if (LlmConfig::provider() === 'openai') {
+                $analysis = $this->openAiDocumentAnalyzer->analyzeText((string) $extractedText);
+                $classification = $analysis['classification'];
+                $extraction = $analysis['extraction'];
 
+                return $this->buildProcessedResult(
+                    source: $source,
+                    detectionInputType: $detection['input_type'],
+                    pageCount: $pageCount,
+                    classification: $classification,
+                    extraction: $extraction
+                );
+            }
+
+            $classification = $this->documentClassifier->classifyText((string) $extractedText);
             $classificationReviewMessages = $this->classificationReviewMessages($classification);
 
             if ($classification['document_type'] === DocumentProcessingValues::BUSINESS_TYPE_AUTRE) {
-                return new ProcessedDocumentResult(
-                    originalName: $source->originalName,
-                    mimeType: $source->mimeType,
-                    path: $source->path,
-                    inputType: $detection['input_type'],
-                    documentType: $classification['document_type'],
-                    status: DocumentProcessingValues::STATUS_NEEDS_REVIEW,
-                    pagesCount: $pageCount,
-                    rawClassificationJson: $classification,
-                    rawExtractionJson: null,
-                    normalizedJson: ['document_type' => DocumentProcessingValues::BUSINESS_TYPE_AUTRE],
-                    errorMessage: $classificationReviewMessages !== []
-                        ? implode(' ', $classificationReviewMessages)
-                        : 'Unsupported business document type.',
-                    processingId: $source->processingId,
-                );
+                return $this->unsupportedDocumentResult($source, $detection['input_type'], $pageCount, $classification, $classificationReviewMessages);
             }
 
             $extraction = $this->documentExtractor->extractFromText($classification['document_type'], (string) $extractedText);
@@ -104,13 +118,13 @@ class DocumentProcessor
             }
 
             $review = $this->normalizationService->normalizeAndValidate($classification['document_type'], $extraction);
-            $needsReview = $classification['confidence'] < (float) config('ges-ocr.ollama.classification_confidence_threshold', 0.75)
+            $needsReview = $classification['confidence'] < LlmConfig::classificationConfidenceThreshold()
                 || $classificationReviewMessages !== []
                 || $review['needs_review'];
 
             $reviewMessages = $classificationReviewMessages;
 
-            if ($classification['confidence'] < (float) config('ges-ocr.ollama.classification_confidence_threshold', 0.75)) {
+            if ($classification['confidence'] < LlmConfig::classificationConfidenceThreshold()) {
                 $reviewMessages[] = sprintf('Classification confidence %.2f is below threshold.', $classification['confidence']);
             }
 
@@ -133,6 +147,81 @@ class DocumentProcessor
         } finally {
             $this->cleanupTemporaryImages($pageImages, $temporaryImageDirectory, $source->path);
         }
+    }
+
+    /**
+     * @param  array{document_type: string, confidence: float, review_reason: string}  $classification
+     * @param  array<string, mixed>  $extraction
+     */
+    protected function buildProcessedResult(
+        ProcessingSource $source,
+        ?string $detectionInputType,
+        int $pageCount,
+        array $classification,
+        array $extraction
+    ): ProcessedDocumentResult {
+        $classificationReviewMessages = $this->classificationReviewMessages($classification);
+
+        if ($classification['document_type'] === DocumentProcessingValues::BUSINESS_TYPE_AUTRE) {
+            return $this->unsupportedDocumentResult($source, $detectionInputType, $pageCount, $classification, $classificationReviewMessages);
+        }
+
+        $review = $this->normalizationService->normalizeAndValidate($classification['document_type'], $extraction);
+        $needsReview = $classification['confidence'] < LlmConfig::classificationConfidenceThreshold()
+            || $classificationReviewMessages !== []
+            || $review['needs_review'];
+
+        $reviewMessages = $classificationReviewMessages;
+
+        if ($classification['confidence'] < LlmConfig::classificationConfidenceThreshold()) {
+            $reviewMessages[] = sprintf('Classification confidence %.2f is below threshold.', $classification['confidence']);
+        }
+
+        $reviewMessages = array_merge($reviewMessages, $review['errors']);
+
+        return new ProcessedDocumentResult(
+            originalName: $source->originalName,
+            mimeType: $source->mimeType,
+            path: $source->path,
+            inputType: $detectionInputType,
+            documentType: $classification['document_type'],
+            status: $needsReview ? DocumentProcessingValues::STATUS_NEEDS_REVIEW : DocumentProcessingValues::STATUS_DONE,
+            pagesCount: $pageCount,
+            rawClassificationJson: $classification,
+            rawExtractionJson: $extraction,
+            normalizedJson: $review['normalized'],
+            errorMessage: $needsReview ? implode(' ', $reviewMessages) : null,
+            processingId: $source->processingId,
+        );
+    }
+
+    /**
+     * @param  array{document_type: string, confidence: float, review_reason: string}  $classification
+     * @param  array<int, string>  $classificationReviewMessages
+     */
+    protected function unsupportedDocumentResult(
+        ProcessingSource $source,
+        ?string $detectionInputType,
+        int $pageCount,
+        array $classification,
+        array $classificationReviewMessages
+    ): ProcessedDocumentResult {
+        return new ProcessedDocumentResult(
+            originalName: $source->originalName,
+            mimeType: $source->mimeType,
+            path: $source->path,
+            inputType: $detectionInputType,
+            documentType: $classification['document_type'],
+            status: DocumentProcessingValues::STATUS_NEEDS_REVIEW,
+            pagesCount: $pageCount,
+            rawClassificationJson: $classification,
+            rawExtractionJson: null,
+            normalizedJson: ['document_type' => DocumentProcessingValues::BUSINESS_TYPE_AUTRE],
+            errorMessage: $classificationReviewMessages !== []
+                ? implode(' ', $classificationReviewMessages)
+                : 'Unsupported business document type.',
+            processingId: $source->processingId,
+        );
     }
 
     /**
@@ -213,7 +302,7 @@ class DocumentProcessor
 
     protected function configuredMaxPages(): int
     {
-        return max((int) config('ges-ocr.ollama.max_pages', 0), 0);
+        return LlmConfig::maxPages();
     }
 
     protected function limitTextToPages(string $text, int $maxPages): string

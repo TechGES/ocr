@@ -27,6 +27,14 @@ Current model strategy:
 - `qwen2.5vl:7b` for visual transcription only
 - `qwen2.5:7b` for classification and structured extraction
 
+Available AI providers:
+- `ollama`
+- `openai`
+
+Provider strategy:
+- `ollama` uses a multi-step pipeline: vision transcription, classification, extraction, optional MRZ merge
+- `openai` uses a single structured request per document and returns classification plus extracted data in one response
+
 ## Package Boundaries
 
 This package contains:
@@ -35,7 +43,7 @@ This package contains:
 - extractor
 - normalizer
 - schema factory
-- Ollama client
+- AI clients for Ollama and OpenAI
 - package `DocumentProcessing` model
 - package migration and factory
 - install command
@@ -91,8 +99,8 @@ php artisan ocr:health
 It checks:
 - `pdftotext`
 - `pdftoppm`
-- Ollama connectivity
-- configured Ollama models
+- selected AI provider connectivity
+- configured text and vision models
 
 ## Configuration
 
@@ -105,6 +113,10 @@ config/ges-ocr.php
 Main environment variables:
 
 ```env
+GES_OCR_AI_PROVIDER=ollama
+GES_OCR_CLASSIFICATION_CONFIDENCE_THRESHOLD=0.75
+GES_OCR_MAX_PAGES=0
+
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 OLLAMA_TEXT_MODEL=qwen2.5:7b
 OLLAMA_VISION_MODEL=qwen2.5vl:7b
@@ -112,19 +124,31 @@ OLLAMA_CONNECT_TIMEOUT=10
 OLLAMA_TIMEOUT=120
 OLLAMA_RETRY_TIMES=2
 OLLAMA_RETRY_SLEEP_MS=500
-OLLAMA_CLASSIFICATION_CONFIDENCE_THRESHOLD=0.75
-OLLAMA_MAX_PAGES=0
 OLLAMA_BASIC_AUTH_ENABLED=false
 OLLAMA_BASIC_AUTH_USERNAME=
 OLLAMA_BASIC_AUTH_PASSWORD=
+
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=
+OPENAI_TEXT_MODEL=gpt-4.1-mini
+OPENAI_VISION_MODEL=gpt-4.1-mini
+OPENAI_CONNECT_TIMEOUT=10
+OPENAI_TIMEOUT=120
+OPENAI_RETRY_TIMES=2
+OPENAI_RETRY_SLEEP_MS=500
+
 GES_OCR_MRZ_OCR_ENABLED=true
 GES_OCR_CLEANUP_TEMPORARY_FILES=true
 ```
 
-`OLLAMA_MAX_PAGES=0` means unlimited pages.
+`GES_OCR_AI_PROVIDER` accepts `ollama` or `openai`.
+
+`GES_OCR_MAX_PAGES=0` means unlimited pages.
 
 Main config areas:
+- `ai`
 - `ollama`
+- `openai`
 - `mrz`
 - `processing`
 
@@ -132,6 +156,15 @@ Optional Ollama upstream basic auth:
 - `OLLAMA_BASIC_AUTH_ENABLED=true` enables HTTP basic auth on requests sent to `OLLAMA_BASE_URL`
 - `OLLAMA_BASIC_AUTH_USERNAME` sets the upstream username
 - `OLLAMA_BASIC_AUTH_PASSWORD` sets the upstream password
+
+Example OpenAI setup:
+
+```env
+GES_OCR_AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_TEXT_MODEL=gpt-4.1-mini
+OPENAI_VISION_MODEL=gpt-4.1-mini
+```
 
 ## Public API
 
@@ -296,6 +329,7 @@ If you are an AI agent working in a project using this package:
 - For images and scanned PDFs, the package uses two LLM stages:
   - vision transcription
   - text classification/extraction
+- Exception: when `GES_OCR_AI_PROVIDER=openai`, the package uses a one-shot analysis request instead.
 - Do not assume `acte_propriete` means generic property deed. In this package it currently means land-title deed only.
 - Distinguish `identity_card` from `residence_permit`.
 - Use `residence_permit` for French residence permits and `identity_card` for French identity cards.
@@ -327,7 +361,7 @@ RUN_MANUAL_OCR_TESTS=1
 ## Current Assumptions
 
 - documents are French documents
-- Ollama is reachable from the Laravel app
+- the selected AI provider is reachable from the Laravel app
 - `pdftotext` and `pdftoppm` are available for PDF handling
 
 ## Non-Goals

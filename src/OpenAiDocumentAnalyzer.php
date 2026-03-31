@@ -82,7 +82,13 @@ class OpenAiDocumentAnalyzer
             "Pour les KBIS, registration_number doit reprendre la valeur brute de l Immatriculation RCS et sirene doit contenir exactement 9 chiffres.\n".
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
-            "Pour MSA, dept contient 2 chiffres, com 3 chiffres, prefixe 3 chiffres ou une chaine vide, section 1 ou 2 caracteres, numero_plan 4 chiffres si lisibles.\n".
+            "Pour MSA, lis uniquement les colonnes DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
+            "Pour MSA, ignore strictement les colonnes intermediaires non demandees, meme si elles contiennent des lettres ou nombres comme L, M, B, C, O, 00160, 00193 ou 00143.\n".
+            "Pour MSA, dept contient 2 chiffres, com 3 chiffres, prefixe exactement 3 chiffres ou une chaine vide, section 1 ou 2 caracteres, numero_plan 4 chiffres si lisibles.\n".
+            "Pour MSA, les lettres L, M, B, C ou O lues dans des colonnes non demandees ou dans les marqueurs de pluri exploitation ne doivent jamais etre retournees comme prefixe.\n".
+            "Pour MSA, une section ne doit jamais etre un nombre long comme 00160, 00193 ou 00143.\n".
+            "Exemple MSA: '85 006 L 00160 ... B 0357' donne dept=85, com=006, prefixe='', section='B', numero_plan='0357'.\n".
+            "Exemple MSA: '85 055 B 00143 O ... ZI 0030' donne dept=85, com=055, prefixe='', section='ZI', numero_plan='0030'.\n".
             "N invente aucune information.";
     }
 

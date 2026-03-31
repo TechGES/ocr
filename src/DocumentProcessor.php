@@ -53,6 +53,27 @@ class DocumentProcessor
                 $extractedText = $this->limitTextToPages($extractedText, $maxPages);
             }
 
+            if (
+                LlmConfig::provider() === 'openai'
+                && $detection['input_type'] === DocumentProcessingValues::INPUT_TYPE_PDF_TEXT
+                && $this->looksLikeMsaParcelTable((string) $extractedText)
+            ) {
+                $pageImages = $this->pdfToImageConverter->convert($source->path, $temporaryImageDirectory, $maxPages);
+                $pageCount = count($pageImages);
+
+                $analysis = $this->openAiDocumentAnalyzer->analyzeImages($pageImages);
+                $classification = $analysis['classification'];
+                $extraction = $analysis['extraction'];
+
+                return $this->buildProcessedResult(
+                    source: $source,
+                    detectionInputType: $detection['input_type'],
+                    pageCount: $pageCount,
+                    classification: $classification,
+                    extraction: $extraction
+                );
+            }
+
             if ($detection['input_type'] === DocumentProcessingValues::INPUT_TYPE_PDF_SCAN) {
                 $pageImages = $this->pdfToImageConverter->convert($source->path, $temporaryImageDirectory, $maxPages);
                 $pageCount = count($pageImages);
@@ -298,6 +319,17 @@ class DocumentProcessor
     protected function isNegatedMention(string $reviewReason, string $keyword): bool
     {
         return preg_match('/\b(ne correspond pas|pas|aucun|ni)\b[^.]{0,80}\b'.preg_quote($keyword, '/').'/u', $reviewReason) === 1;
+    }
+
+    protected function looksLikeMsaParcelTable(string $text): bool
+    {
+        $normalized = mb_strtolower($text);
+        $normalized = str_replace(["'", '’'], ' ', $normalized);
+
+        return str_contains($normalized, 'releve d exploitation')
+            && str_contains($normalized, 'identification des parcelles')
+            && str_contains($normalized, 'numero plan')
+            && str_contains($normalized, 'msa');
     }
 
     protected function configuredMaxPages(): int

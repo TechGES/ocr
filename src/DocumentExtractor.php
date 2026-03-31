@@ -173,11 +173,15 @@ class DocumentExtractor
                 "Extrais uniquement les informations suivantes: msa_parcels.\n".
                 "Chaque element de msa_parcels doit representer exactement une ligne de parcelle du tableau visible.\n".
                 "Pour chaque ligne, retourne dept, com, prefixe, section et numero_plan.\n".
+                "Lis uniquement les colonnes 1, 2, 6, 7 et 8 du tableau: DEPT, COM, PREFIXE, SECTION, NUMERO PLAN.\n".
+                "Ignore strictement les colonnes 3, 4 et 5, meme si elles contiennent des lettres ou nombres comme L, M, B, C, O, 00160, 00193 ou 00143.\n".
                 "DEPT correspond a la colonne 1 et doit contenir 2 chiffres si lisibles.\n".
                 "COM correspond a la colonne 2 et doit contenir 3 chiffres si lisibles.\n".
-                "PREFIXE correspond a la colonne 6 et doit contenir 3 chiffres si lisibles, sinon une chaine vide.\n".
-                "SECTION correspond a la colonne 7 et doit contenir 1 ou 2 caracteres tels que visibles.\n".
+                "PREFIXE correspond a la colonne 6 et doit contenir exactement 3 chiffres si lisibles, sinon une chaine vide. Si la valeur visible est une lettre comme L, M, B, C ou O, ce n est pas un prefixe et il faut retourner une chaine vide.\n".
+                "SECTION correspond a la colonne 7 et doit contenir 1 ou 2 caracteres tels que visibles. Une section ne doit jamais etre un nombre comme 00160, 00193 ou 00143.\n".
                 "NUMERO PLAN correspond a la colonne 8 et doit contenir 4 chiffres si lisibles.\n".
+                "Dans une ligne comme '85 006 L 00160 ... B 0357', il faut retourner dept=85, com=006, prefixe='', section='B', numero_plan='0357'.\n".
+                "Dans une ligne comme '85 055 B 00143 O ... ZI 0030', il faut retourner dept=85, com=055, prefixe='', section='ZI', numero_plan='0030'. Le 'O' de pluri exploitation ne doit jamais etre retourne dans prefixe.\n".
                 "Si DEPT ou COM est vide sur une ligne du tableau, laisse la valeur vide plutot que d inventer: la normalisation applicative reportera la derniere valeur connue.\n".
                 "N invente jamais de ligne absente et ne fusionne jamais deux lignes distinctes.\n",
             default => '',

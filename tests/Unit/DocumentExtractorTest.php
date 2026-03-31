@@ -232,6 +232,9 @@ it('enforces the MSA parcel-table extraction contract', function () {
                 && str_contains($content, 'PREFIXE correspond a la colonne 6')
                 && str_contains($content, 'SECTION correspond a la colonne 7')
                 && str_contains($content, 'NUMERO PLAN correspond a la colonne 8')
+                && str_contains($content, 'Ignore strictement les colonnes 3, 4 et 5')
+                && str_contains($content, "85 006 L 00160 ... B 0357")
+                && str_contains($content, "85 055 B 00143 O ... ZI 0030")
                 && str_contains($content, 'la normalisation applicative reportera la derniere valeur connue');
         })
         ->andReturn([

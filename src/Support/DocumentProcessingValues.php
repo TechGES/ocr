@@ -42,6 +42,8 @@ class DocumentProcessingValues
 
     public const BUSINESS_TYPE_ACTE_PROPRIETE = 'acte_propriete';
 
+    public const BUSINESS_TYPE_MSA = 'msa';
+
     public const BUSINESS_TYPE_AUTRE = 'autre';
 
     /**

@@ -12,6 +12,7 @@ This package is built for French business and identity documents, with current s
 - `other_identity_document`
 - `kbis`
 - `acte_propriete` (land-title deed only)
+- `msa` (parcel table)
 
 ## What This Package Does
 

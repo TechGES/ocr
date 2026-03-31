@@ -169,6 +169,17 @@ class DocumentExtractor
                 "Pour un owner de type company, laisse civility, first_name et last_name vides.\n".
                 "Pour un owner de type person, retourne seulement civility, first_name et last_name.\n".
                 "N extrais ni notaire, ni date d acte, ni vendeurs.\n",
+            DocumentProcessingValues::BUSINESS_TYPE_MSA => "Il s agit toujours d un tableau MSA de parcelles cadastrales.\n".
+                "Extrais uniquement les informations suivantes: msa_parcels.\n".
+                "Chaque element de msa_parcels doit representer exactement une ligne de parcelle du tableau visible.\n".
+                "Pour chaque ligne, retourne dept, com, prefixe, section et numero_plan.\n".
+                "DEPT correspond a la colonne 1 et doit contenir 2 chiffres si lisibles.\n".
+                "COM correspond a la colonne 2 et doit contenir 3 chiffres si lisibles.\n".
+                "PREFIXE correspond a la colonne 6 et doit contenir 3 chiffres si lisibles, sinon une chaine vide.\n".
+                "SECTION correspond a la colonne 7 et doit contenir 1 ou 2 caracteres tels que visibles.\n".
+                "NUMERO PLAN correspond a la colonne 8 et doit contenir 4 chiffres si lisibles.\n".
+                "Si DEPT ou COM est vide sur une ligne du tableau, laisse la valeur vide plutot que d inventer: la normalisation applicative reportera la derniere valeur connue.\n".
+                "N invente jamais de ligne absente et ne fusionne jamais deux lignes distinctes.\n",
             default => '',
         };
     }

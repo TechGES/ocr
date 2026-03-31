@@ -23,6 +23,7 @@ class DocumentNormalizationService
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => $this->normalizeIdentityDocument($payload, DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT),
             DocumentProcessingValues::BUSINESS_TYPE_KBIS => $this->normalizeKbis($payload),
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => $this->normalizeActePropriete($payload),
+            DocumentProcessingValues::BUSINESS_TYPE_MSA => $this->normalizeMsa($payload),
             default => ['document_type' => DocumentProcessingValues::BUSINESS_TYPE_AUTRE],
         };
 
@@ -36,6 +37,7 @@ class DocumentNormalizationService
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => $this->validateCin($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_KBIS => $this->validateKbis($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => $this->validateActePropriete($normalized),
+            DocumentProcessingValues::BUSINESS_TYPE_MSA => $this->validateMsa($normalized),
             default => ['Document type requires manual review.'],
         };
 
@@ -250,6 +252,78 @@ class DocumentNormalizationService
 
     /**
      * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function normalizeMsa(array $payload): array
+    {
+        $parcelPayloads = is_array($payload['msa_parcels'] ?? null)
+            ? $payload['msa_parcels']
+            : (is_array($payload['parcel_rows'] ?? null)
+                ? $payload['parcel_rows']
+                : (is_array($payload['parcels'] ?? null) ? $payload['parcels'] : []));
+
+        $lastDept = '';
+        $lastCom = '';
+        $rows = [];
+        $seen = [];
+
+        foreach ($parcelPayloads as $parcelPayload) {
+            $rowPayload = is_array($parcelPayload) ? $parcelPayload : [];
+
+            $dept = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['dept', 'departement']), 2);
+            $com = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['com', 'commune']), 3);
+            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
+            $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
+            $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
+
+            if ($dept === '') {
+                $dept = $lastDept;
+            } else {
+                $lastDept = $dept;
+            }
+
+            if ($com === '') {
+                $com = $lastCom;
+            } else {
+                $lastCom = $com;
+            }
+
+            if ($dept === '' && $com === '' && $prefixe === '' && $section === '' && $numeroPlan === '') {
+                continue;
+            }
+
+            $record = [
+                'dept' => $dept,
+                'com' => $com,
+                'prefixe' => $prefixe,
+                'section' => $section,
+                'numero_plan' => $numeroPlan,
+            ];
+
+            $dedupeKey = implode('.', [
+                $record['dept'],
+                $record['com'],
+                $record['prefixe'],
+                $record['section'],
+                $record['numero_plan'],
+            ]);
+
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+
+            $seen[$dedupeKey] = true;
+            $rows[] = $record;
+        }
+
+        return [
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'msa_parcels' => $rows,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
      * @return array<int, string>
      */
     private function validateCin(array $payload): array
@@ -346,6 +420,52 @@ class DocumentNormalizationService
 
         if (($payload['owners'] ?? []) === [] && ($payload['cadastral_parcels'] ?? []) === []) {
             $errors[] = 'Land title deed requires at least one owner or one cadastral parcel.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function validateMsa(array $payload): array
+    {
+        $errors = [];
+        $rows = is_array($payload['msa_parcels'] ?? null) ? $payload['msa_parcels'] : [];
+
+        if ($rows === []) {
+            return ['MSA requires at least one parcel row.'];
+        }
+
+        foreach ($rows as $index => $row) {
+            if (! is_array($row)) {
+                $errors[] = sprintf('MSA row %d is invalid.', $index + 1);
+
+                continue;
+            }
+
+            $rowNumber = $index + 1;
+
+            if (($row['dept'] ?? '') === '' || preg_match('/^\d{2}$/', (string) $row['dept']) !== 1) {
+                $errors[] = sprintf('MSA row %d dept must contain exactly 2 digits.', $rowNumber);
+            }
+
+            if (($row['com'] ?? '') === '' || preg_match('/^\d{3}$/', (string) $row['com']) !== 1) {
+                $errors[] = sprintf('MSA row %d com must contain exactly 3 digits.', $rowNumber);
+            }
+
+            if (($row['prefixe'] ?? '') !== '' && preg_match('/^\d{3}$/', (string) $row['prefixe']) !== 1) {
+                $errors[] = sprintf('MSA row %d prefixe must contain exactly 3 digits when present.', $rowNumber);
+            }
+
+            if (($row['section'] ?? '') === '' || preg_match('/^[A-Z0-9]{2}$/', (string) $row['section']) !== 1) {
+                $errors[] = sprintf('MSA row %d section must contain exactly 2 normalized characters.', $rowNumber);
+            }
+
+            if (($row['numero_plan'] ?? '') === '' || preg_match('/^\d{4}$/', (string) $row['numero_plan']) !== 1) {
+                $errors[] = sprintf('MSA row %d numero_plan must contain exactly 4 digits.', $rowNumber);
+            }
         }
 
         return $errors;
@@ -604,6 +724,39 @@ class DocumentNormalizationService
             'postal_code' => '',
             'city' => '',
         ];
+    }
+
+    private function normalizeFixedDigits(string $value, int $length): string
+    {
+        $digits = preg_replace('/\D+/u', '', trim($value)) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        if (strlen($digits) >= $length) {
+            return strlen($digits) === $length
+                ? $digits
+                : substr($digits, -$length);
+        }
+
+        return str_pad($digits, $length, '0', STR_PAD_LEFT);
+    }
+
+    private function normalizeMsaSection(string $value): string
+    {
+        $normalized = mb_strtoupper(trim($value));
+        $normalized = preg_replace('/[^A-Z0-9]/u', '', $normalized) ?? $normalized;
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        if (strlen($normalized) === 1) {
+            return '0'.$normalized;
+        }
+
+        return substr($normalized, 0, 2);
     }
 
     /**

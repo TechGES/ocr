@@ -25,6 +25,7 @@ it('analyzes a document in one structured openai request', function () {
                     'legal_representatives',
                     'cadastral_parcels',
                     'owners',
+                    'msa_parcels',
                 ]);
 
             return [
@@ -58,6 +59,7 @@ it('analyzes a document in one structured openai request', function () {
                     'legal_representatives' => [],
                     'cadastral_parcels' => [],
                     'owners' => [],
+                    'msa_parcels' => [],
                 ],
             ];
         });

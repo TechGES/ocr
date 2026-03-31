@@ -68,7 +68,7 @@ class OpenAiDocumentAnalyzer
     {
         return "Tu es un agent d analyse documentaire pour des documents francais d identite et d entreprise.\n".
             "Fais en une seule passe la classification et l extraction structuree.\n".
-            "Determine document_type parmi identity_card, residence_permit, passport, visa, crew_card, travel_document, other_identity_document, kbis, acte_propriete ou autre.\n".
+            "Determine document_type parmi identity_card, residence_permit, passport, visa, crew_card, travel_document, other_identity_document, kbis, acte_propriete, msa ou autre.\n".
             "Retourne confidence entre 0 et 1 et review_reason bref et coherent.\n".
             "Remplis extracted_data avec toutes les cles du schema.\n".
             "Pour le type de document detecte, remplis les champs pertinents.\n".
@@ -81,6 +81,8 @@ class OpenAiDocumentAnalyzer
             "Conserve strictement les caracteres '<' et les separateurs '<<' dans la MRZ.\n".
             "Pour les KBIS, registration_number doit reprendre la valeur brute de l Immatriculation RCS et sirene doit contenir exactement 9 chiffres.\n".
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
+            "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
+            "Pour MSA, dept contient 2 chiffres, com 3 chiffres, prefixe 3 chiffres ou une chaine vide, section 1 ou 2 caracteres, numero_plan 4 chiffres si lisibles.\n".
             "N invente aucune information.";
     }
 

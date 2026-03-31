@@ -212,3 +212,36 @@ it('enforces the French land-title deed extraction contract', function () {
 
     expect($result['document_type'])->toBe(DocumentProcessing::BUSINESS_TYPE_ACTE_PROPRIETE);
 });
+
+it('enforces the MSA parcel-table extraction contract', function () {
+    $schemaFactory = new DocumentSchemaFactory;
+    $ollamaClient = Mockery::mock(OllamaClient::class);
+    $ollamaClient->shouldReceive('chatStructured')
+        ->once()
+        ->withArgs(function (string $model, array $messages, array $passedSchema): bool {
+            $content = $messages[0]['content'] ?? '';
+
+            return $model !== ''
+                && $passedSchema['properties']['document_type']['enum'] === [DocumentProcessing::BUSINESS_TYPE_MSA]
+                && array_key_exists('msa_parcels', $passedSchema['properties'])
+                && str_contains($content, 'tableau MSA de parcelles cadastrales')
+                && str_contains($content, 'Extrais uniquement les informations suivantes: msa_parcels')
+                && str_contains($content, 'Chaque element de msa_parcels doit representer exactement une ligne de parcelle du tableau visible')
+                && str_contains($content, 'DEPT correspond a la colonne 1')
+                && str_contains($content, 'COM correspond a la colonne 2')
+                && str_contains($content, 'PREFIXE correspond a la colonne 6')
+                && str_contains($content, 'SECTION correspond a la colonne 7')
+                && str_contains($content, 'NUMERO PLAN correspond a la colonne 8')
+                && str_contains($content, 'la normalisation applicative reportera la derniere valeur connue');
+        })
+        ->andReturn([
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [],
+        ]);
+
+    $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
+
+    $result = $extractor->extractFromText(DocumentProcessing::BUSINESS_TYPE_MSA, 'DEPT COM ... SECTION NUMERO PLAN');
+
+    expect($result['document_type'])->toBe(DocumentProcessing::BUSINESS_TYPE_MSA);
+});

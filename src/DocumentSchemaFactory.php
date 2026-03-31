@@ -27,6 +27,7 @@ class DocumentSchemaFactory
                         DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT,
                         DocumentProcessingValues::BUSINESS_TYPE_KBIS,
                         DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE,
+                        DocumentProcessingValues::BUSINESS_TYPE_MSA,
                         DocumentProcessingValues::BUSINESS_TYPE_AUTRE,
                     ],
                 ],
@@ -137,6 +138,29 @@ class DocumentSchemaFactory
                     ],
                 ],
                 'required' => ['document_type', 'cadastral_parcels', 'owners'],
+                'additionalProperties' => false,
+            ],
+            DocumentProcessingValues::BUSINESS_TYPE_MSA => [
+                'type' => 'object',
+                'properties' => [
+                    'document_type' => ['type' => 'string', 'enum' => [DocumentProcessingValues::BUSINESS_TYPE_MSA]],
+                    'msa_parcels' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'dept' => ['type' => 'string'],
+                                'com' => ['type' => 'string'],
+                                'prefixe' => ['type' => 'string'],
+                                'section' => ['type' => 'string'],
+                                'numero_plan' => ['type' => 'string'],
+                            ],
+                            'required' => ['dept', 'com', 'prefixe', 'section', 'numero_plan'],
+                            'additionalProperties' => false,
+                        ],
+                    ],
+                ],
+                'required' => ['document_type', 'msa_parcels'],
                 'additionalProperties' => false,
             ],
             default => throw new InvalidArgumentException("Unsupported document type [{$documentType}] for extraction."),
@@ -272,6 +296,21 @@ class DocumentSchemaFactory
                         'additionalProperties' => false,
                     ],
                 ],
+                'msa_parcels' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'dept' => ['type' => 'string'],
+                            'com' => ['type' => 'string'],
+                            'prefixe' => ['type' => 'string'],
+                            'section' => ['type' => 'string'],
+                            'numero_plan' => ['type' => 'string'],
+                        ],
+                        'required' => ['dept', 'com', 'prefixe', 'section', 'numero_plan'],
+                        'additionalProperties' => false,
+                    ],
+                ],
             ],
             'required' => [
                 'document_type',
@@ -300,6 +339,7 @@ class DocumentSchemaFactory
                 'legal_representatives',
                 'cadastral_parcels',
                 'owners',
+                'msa_parcels',
             ],
             'additionalProperties' => false,
         ];

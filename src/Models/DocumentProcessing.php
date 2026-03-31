@@ -50,6 +50,8 @@ class DocumentProcessing extends Model
 
     public const BUSINESS_TYPE_ACTE_PROPRIETE = DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE;
 
+    public const BUSINESS_TYPE_MSA = DocumentProcessingValues::BUSINESS_TYPE_MSA;
+
     public const BUSINESS_TYPE_AUTRE = DocumentProcessingValues::BUSINESS_TYPE_AUTRE;
 
     protected $fillable = [

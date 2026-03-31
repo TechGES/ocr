@@ -82,13 +82,21 @@ class OpenAiDocumentAnalyzer
             "Pour les KBIS, registration_number doit reprendre la valeur brute de l Immatriculation RCS et sirene doit contenir exactement 9 chiffres.\n".
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
+            "Pour les documents MSA, traite toutes les pages fournies et retourne toutes les lignes visibles du tableau, meme s il y en a plus de 200.\n".
             "Pour MSA, lis uniquement les colonnes DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
             "Pour MSA, ignore strictement les colonnes intermediaires non demandees, meme si elles contiennent des lettres ou nombres comme L, M, B, C, O, 00160, 00193 ou 00143.\n".
+            "Pour MSA, lis le couple SECTION + NUMERO PLAN uniquement dans le bloc d identification des parcelles, avant les colonnes CULT CAD, ANT, SUPERFICIE, R.C REEL, Euros et Faire Valoir.\n".
+            "Pour MSA, les motifs de droite comme '02 T', '03 T', '02 P', '01 P', 'A 03 T' ou 'B 03 P' appartiennent aux colonnes de culture et ne doivent jamais etre utilises pour section ou numero_plan.\n".
             "Pour MSA, dept contient 2 chiffres, com 3 chiffres, prefixe exactement 3 chiffres ou une chaine vide, section 1 ou 2 caracteres, numero_plan 4 chiffres si lisibles.\n".
             "Pour MSA, les lettres L, M, B, C ou O lues dans des colonnes non demandees ou dans les marqueurs de pluri exploitation ne doivent jamais etre retournees comme prefixe.\n".
-            "Pour MSA, une section ne doit jamais etre un nombre long comme 00160, 00193 ou 00143.\n".
+            "Pour MSA, une section doit etre alphabetique ou cadastrale et ne doit jamais etre purement numerique, donc 03, 00, 00160, 00193 ou 00143 sont invalides pour section.\n".
+            "Pour MSA, numero_plan doit contenir 4 chiffres lisibles et 0000 est impossible.\n".
+            "Pour MSA, si tu hesites entre une valeur numerique courte comme 03 et une section voisine alphabetique comme B, ZI ou ZD, retiens toujours la valeur alphabetique de la colonne SECTION.\n".
             "Exemple MSA: '85 006 L 00160 ... B 0357' donne dept=85, com=006, prefixe='', section='B', numero_plan='0357'.\n".
             "Exemple MSA: '85 055 B 00143 O ... ZI 0030' donne dept=85, com=055, prefixe='', section='ZI', numero_plan='0030'.\n".
+            "Exemple MSA: '85 055 M 00042 ... ZD 0026 ... A 03 T' donne section='ZD' et numero_plan='0026'. Il ne faut jamais utiliser 'A 03 T' pour construire la parcelle.\n".
+            "Pour MSA, quand plusieurs lignes sont empilees sous la meme tete de compte et que seules les paires comme 'ZD 0006', 'ZD 0007', 'ZD 0011', 'ZD 0016', 'ZD 0026', 'ZD 0041' changent, retourne une entree par paire visible.\n".
+            "Avant de repondre pour MSA, verifie qu aucune ligne ne contient section='03' ou numero_plan='0000' sauf si le document montre exactement cette valeur dans la bonne colonne, ce qui est normalement impossible.\n".
             "N invente aucune information.";
     }
 

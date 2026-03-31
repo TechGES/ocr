@@ -172,16 +172,25 @@ class DocumentExtractor
             DocumentProcessingValues::BUSINESS_TYPE_MSA => "Il s agit toujours d un tableau MSA de parcelles cadastrales.\n".
                 "Extrais uniquement les informations suivantes: msa_parcels.\n".
                 "Chaque element de msa_parcels doit representer exactement une ligne de parcelle du tableau visible.\n".
+                "Traite toutes les pages du document fournies en entree et retourne toutes les lignes de parcelles visibles sur toutes ces pages, sans t arreter apres un echantillon partiel.\n".
+                "Si le tableau contient plus de 200 lignes, retourne quand meme toutes les lignes visibles.\n".
                 "Pour chaque ligne, retourne dept, com, prefixe, section et numero_plan.\n".
                 "Lis uniquement les colonnes 1, 2, 6, 7 et 8 du tableau: DEPT, COM, PREFIXE, SECTION, NUMERO PLAN.\n".
                 "Ignore strictement les colonnes 3, 4 et 5, meme si elles contiennent des lettres ou nombres comme L, M, B, C, O, 00160, 00193 ou 00143.\n".
+                "Le couple SECTION + NUMERO PLAN doit etre lu uniquement dans le bloc d identification des parcelles, juste a droite du bloc PREFIXE/numero intermediaire et avant les colonnes CULT CAD, ANT, SUPERFICIE, R.C REEL, Euros, Faire Valoir et lieu-dit.\n".
+                "Ne lis jamais SECTION ou NUMERO PLAN dans les colonnes de culture ou de surface a droite. Des motifs comme '02 T', '03 T', '02 P', '01 P', 'A 03 T' ou 'B 03 P' appartiennent a ces colonnes de droite et ne sont jamais des identifiants de parcelle.\n".
                 "DEPT correspond a la colonne 1 et doit contenir 2 chiffres si lisibles.\n".
                 "COM correspond a la colonne 2 et doit contenir 3 chiffres si lisibles.\n".
                 "PREFIXE correspond a la colonne 6 et doit contenir exactement 3 chiffres si lisibles, sinon une chaine vide. Si la valeur visible est une lettre comme L, M, B, C ou O, ce n est pas un prefixe et il faut retourner une chaine vide.\n".
-                "SECTION correspond a la colonne 7 et doit contenir 1 ou 2 caracteres tels que visibles. Une section ne doit jamais etre un nombre comme 00160, 00193 ou 00143.\n".
-                "NUMERO PLAN correspond a la colonne 8 et doit contenir 4 chiffres si lisibles.\n".
+                "SECTION correspond a la colonne 7 et doit contenir 1 ou 2 lettres ou caracteres cadastraux tels que visibles. Une section ne doit jamais etre purement numerique, donc des valeurs comme 03, 00, 00160, 00193 ou 00143 sont invalides pour section.\n".
+                "NUMERO PLAN correspond a la colonne 8 et doit contenir 4 chiffres si lisibles. La valeur 0000 est impossible et ne doit jamais etre retournee.\n".
+                "Si tu hesites entre une valeur numerique courte comme 03 et une section alphabétique voisine comme B, ZI ou ZD, la section correcte est la valeur alphabétique de la colonne SECTION.\n".
                 "Dans une ligne comme '85 006 L 00160 ... B 0357', il faut retourner dept=85, com=006, prefixe='', section='B', numero_plan='0357'.\n".
                 "Dans une ligne comme '85 055 B 00143 O ... ZI 0030', il faut retourner dept=85, com=055, prefixe='', section='ZI', numero_plan='0030'. Le 'O' de pluri exploitation ne doit jamais etre retourne dans prefixe.\n".
+                "Dans un bloc comme '85 055 M 00042 ... ZD 0026 ... A 03 T', il faut retourner section='ZD' et numero_plan='0026'. Il ne faut jamais retourner section='A' ni numero_plan='0365' a partir de 'A 03 T'.\n".
+                "Si plusieurs lignes partagent les memes colonnes de gauche et que seules les valeurs du bloc SECTION + NUMERO PLAN changent en dessous, retourne une ligne de parcelle pour chaque paire visible comme 'ZD 0006', 'ZD 0007', 'ZD 0011', 'ZD 0016', 'ZD 0026', 'ZD 0041', etc.\n".
+                "Ne saute aucune ligne simplement parce que dept ou com sont omis visuellement: retourne une entree pour chaque ligne visible et laisse dept ou com vides si necessaire.\n".
+                "Avant de repondre, verifie que chaque ligne retournee a une section alphabetique plausible et un numero_plan different de 0000.\n".
                 "Si DEPT ou COM est vide sur une ligne du tableau, laisse la valeur vide plutot que d inventer: la normalisation applicative reportera la derniere valeur connue.\n".
                 "N invente jamais de ligne absente et ne fusionne jamais deux lignes distinctes.\n",
             default => '',

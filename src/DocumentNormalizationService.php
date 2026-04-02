@@ -22,6 +22,8 @@ class DocumentNormalizationService
             DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT => $this->normalizeIdentityDocument($payload, DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT),
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => $this->normalizeIdentityDocument($payload, DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT),
             DocumentProcessingValues::BUSINESS_TYPE_KBIS => $this->normalizeKbis($payload),
+            DocumentProcessingValues::BUSINESS_TYPE_INPI => $this->normalizeCompanyExtract($payload, DocumentProcessingValues::BUSINESS_TYPE_INPI),
+            DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION => $this->normalizeCompanyExtract($payload, DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION),
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => $this->normalizeActePropriete($payload),
             DocumentProcessingValues::BUSINESS_TYPE_MSA => $this->normalizeMsa($payload),
             default => ['document_type' => DocumentProcessingValues::BUSINESS_TYPE_AUTRE],
@@ -36,6 +38,8 @@ class DocumentNormalizationService
             DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT => $this->validateCin($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => $this->validateCin($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_KBIS => $this->validateKbis($normalized),
+            DocumentProcessingValues::BUSINESS_TYPE_INPI => $this->validateKbis($normalized),
+            DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION => $this->validateKbis($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => $this->validateActePropriete($normalized),
             DocumentProcessingValues::BUSINESS_TYPE_MSA => $this->validateMsa($normalized),
             default => ['Document type requires manual review.'],
@@ -159,6 +163,15 @@ class DocumentNormalizationService
      */
     private function normalizeKbis(array $payload): array
     {
+        return $this->normalizeCompanyExtract($payload, DocumentProcessingValues::BUSINESS_TYPE_KBIS);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function normalizeCompanyExtract(array $payload, string $documentType): array
+    {
         $address = $this->normalizeAddressParts(
             $this->firstStringValue($payload, ['street_address', 'address', 'adresse_siege']),
             $this->firstStringValue($payload, ['postal_code']),
@@ -176,7 +189,7 @@ class DocumentNormalizationService
         );
 
         return [
-            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_KBIS,
+            'document_type' => $documentType,
             'company_name' => $this->firstStringValue($payload, ['company_name', 'raison_sociale']),
             'trade_name' => $this->firstStringValue($payload, ['trade_name', 'sigle']),
             'legal_form' => $this->firstStringValue($payload, ['legal_form', 'forme_juridique']),

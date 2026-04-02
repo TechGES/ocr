@@ -131,8 +131,10 @@ class DocumentExtractor
                 "La ligne avec un code postal francais a 5 chiffres et la ville doit remplir postal_code et city.\n".
                 "Ignore une ligne finale contenant seulement FRANCE.\n".
                 "Si un code postal est visible dans l adresse du document, retourne-le obligatoirement dans postal_code.\n",
-            DocumentProcessingValues::BUSINESS_TYPE_KBIS => "Pour les representants legaux, entity_type doit valoir strictement 'person' ou 'company'.\n".
-                "Il s agit toujours d un KBIS francais.\n".
+            DocumentProcessingValues::BUSINESS_TYPE_KBIS,
+            DocumentProcessingValues::BUSINESS_TYPE_INPI,
+            DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION => "Pour les representants legaux, entity_type doit valoir strictement 'person' ou 'company'.\n".
+                "Il s agit toujours d un extrait de situation d entreprise francais de type KBIS, INPI ou acte de situation.\n".
                 "Extrais toutes les entrees presentes dans la section 'GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES'.\n".
                 "N omets jamais une personne physique comme President, Directeur general ou Gerant si elle apparait dans cette section.\n".
                 "N omets pas les roles comme Commissaire aux comptes titulaire, Commissaire aux comptes suppleant, associe, membre ou tout autre role liste dans cette section.\n".
@@ -146,14 +148,14 @@ class DocumentExtractor
                 "Si le representant est une societe, mets son nom exact dans company_name, pas dans entity_type.\n".
                 "Ne mets jamais un nom de societe ou de personne dans entity_type.\n".
                 "Pour un representant societe, extrais aussi si presents: legal_form, street_address, postal_code, city, registration_number et registry_city.\n".
-                "Pour les KBIS, registration_number doit contenir exactement la valeur brute de l Immatriculation RCS, par exemple '387 931 694 R.C.S. Paris'.\n".
+                "Pour les extraits societe, registration_number doit contenir exactement la valeur brute de l Immatriculation RCS, par exemple '387 931 694 R.C.S. Paris'.\n".
                 "Si la ligne R.C.S. est visible, registration_number doit inclure le suffixe 'R.C.S.' suivi de la ville, et pas seulement les 9 chiffres.\n".
-                "Pour les KBIS, sirene doit contenir exactement 9 chiffres.\n".
-                "Pour les KBIS, extrais le sirene uniquement a partir de l Immatriculation RCS.\n".
+                "Pour les extraits societe, sirene doit contenir exactement 9 chiffres.\n".
+                "Pour les extraits societe, extrais le sirene uniquement a partir de l Immatriculation RCS.\n".
                 "Le sirene correspond aux 9 chiffres de la ligne R.C.S., avant 'R.C.S.' et avant la ville.\n".
                 "N utilise jamais le numero d identification europeen pour remplir sirene.\n".
                 "N utilise jamais une autre suite de chiffres voisine pour remplir sirene.\n".
-                "Pour les KBIS, extrais siret uniquement s il apparait explicitement comme SIRET sur le document. N utilise jamais l Immatriculation RCS pour remplir siret.\n",
+                "Pour les extraits societe, extrais siret uniquement s il apparait explicitement comme SIRET sur le document. N utilise jamais l Immatriculation RCS pour remplir siret.\n",
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => "Il s agit toujours d un acte de propriete de terrain francais, pas d un acte de propriete generique.\n".
                 "Extrais uniquement les informations suivantes: cadastral_parcels et owners.\n".
                 "Chaque element de cadastral_parcels doit representer une parcelle cadastrale distincte.\n".

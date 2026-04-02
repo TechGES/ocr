@@ -18,6 +18,7 @@ it('analyzes a document in one structured openai request', function () {
         ->andReturnUsing(function (string $model, array $messages, array $schema): array {
             expect($model)->toBe('gpt-4.1-mini')
                 ->and($messages[0]['content'] ?? '')->toContain('Fais en une seule passe la classification et l extraction structuree')
+                ->and($messages[0]['content'] ?? '')->toContain('kbis, inpi, acte_de_situation')
                 ->and($schema['properties'])->toHaveKey('extracted_data')
                 ->and($schema['properties']['extracted_data']['properties'])->toHaveKeys([
                     'first_name',

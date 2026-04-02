@@ -61,7 +61,7 @@ it('enforces the KBIS representative contract and French KBIS registration guida
         ->and($capturedSchema['properties'])->toHaveKeys(['registration_number', 'siret', 'sirene'])
         ->and(array_key_exists('registration_number', $capturedSchema['properties']['legal_representatives']['items']['properties'] ?? []))->toBeTrue()
         ->and($capturedContent)->toContain("entity_type doit valoir strictement 'person' ou 'company'")
-        ->and($capturedContent)->toContain('KBIS francais')
+        ->and($capturedContent)->toContain('extrait de situation d entreprise francais')
         ->and($capturedContent)->toContain('GESTION, DIRECTION, ADMINISTRATION, CONTROLE, ASSOCIES OU MEMBRES')
         ->and($capturedContent)->toContain('N omets jamais une personne physique comme President, Directeur general ou Gerant')
         ->and($capturedContent)->toContain('Commissaire aux comptes titulaire')
@@ -80,6 +80,23 @@ it('enforces the KBIS representative contract and French KBIS registration guida
         ->and($capturedContent)->toContain('N utilise jamais le numero d identification europeen pour remplir sirene')
         ->and($capturedContent)->toContain('extrais siret uniquement s il apparait explicitement comme SIRET');
 });
+
+it('uses the same extraction contract for inpi and acte de situation company extracts', function (string $documentType) {
+    $schemaFactory = new DocumentSchemaFactory;
+    $schema = $schemaFactory->extractionSchema($documentType);
+
+    expect($schema['properties']['document_type']['enum'])->toBe([$documentType])
+        ->and($schema['properties'])->toHaveKeys([
+            'company_name',
+            'registration_number',
+            'siret',
+            'sirene',
+            'legal_representatives',
+        ]);
+})->with([
+    'inpi' => DocumentProcessing::BUSINESS_TYPE_INPI,
+    'acte_de_situation' => DocumentProcessing::BUSINESS_TYPE_ACTE_DE_SITUATION,
+]);
 
 it('enforces the CIN extraction contract for names and French address lines', function () {
     $schemaFactory = new DocumentSchemaFactory;
@@ -128,7 +145,7 @@ it('enforces the CIN extraction contract for names and French address lines', fu
 
     $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
 
-    $result = $extractor->extractFromImages(DocumentProcessing::BUSINESS_TYPE_CIN, [dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cin.webp']);
+    $result = $extractor->extractFromImages(DocumentProcessing::BUSINESS_TYPE_CIN, [dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cnie.jpg']);
 
     expect($result)->toMatchArray([
         'document_type' => DocumentProcessing::BUSINESS_TYPE_CIN,

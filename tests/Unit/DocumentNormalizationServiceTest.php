@@ -117,3 +117,42 @@ it('normalizes MSA parcel rows with carry-forward, padding, section normalizatio
         ],
     ])->and($result['needs_review'])->toBeFalse();
 });
+
+it('normalizes inpi and acte de situation like company extracts', function (string $documentType) {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate($documentType, [
+        'company_name' => 'GES',
+        'registration_number' => '123 456 789 R.C.S. Paris',
+        'sirene' => '123456789',
+        'siret' => '12345678900011',
+        'postal_code' => '75001',
+        'city' => 'PARIS',
+        'legal_representatives' => [
+            [
+                'entity_type' => 'person',
+                'civility' => 'M',
+                'first_name' => 'Jean',
+                'last_name' => 'Dupont',
+                'company_name' => '',
+                'legal_form' => '',
+                'street_address' => '',
+                'postal_code' => '',
+                'city' => '',
+                'registration_number' => '',
+                'registry_city' => '',
+                'role' => 'Gérant',
+            ],
+        ],
+    ]);
+
+    expect($result['normalized'])->toMatchArray([
+        'document_type' => $documentType,
+        'company_name' => 'GES',
+        'sirene' => '123456789',
+        'siret' => '12345678900011',
+    ])->and($result['needs_review'])->toBeFalse();
+})->with([
+    'inpi' => DocumentProcessing::BUSINESS_TYPE_INPI,
+    'acte_de_situation' => DocumentProcessing::BUSINESS_TYPE_ACTE_DE_SITUATION,
+]);

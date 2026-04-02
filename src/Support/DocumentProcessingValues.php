@@ -40,6 +40,10 @@ class DocumentProcessingValues
 
     public const BUSINESS_TYPE_KBIS = 'kbis';
 
+    public const BUSINESS_TYPE_INPI = 'inpi';
+
+    public const BUSINESS_TYPE_ACTE_DE_SITUATION = 'acte_de_situation';
+
     public const BUSINESS_TYPE_ACTE_PROPRIETE = 'acte_propriete';
 
     public const BUSINESS_TYPE_MSA = 'msa';

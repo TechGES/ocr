@@ -26,6 +26,8 @@ class DocumentSchemaFactory
                         DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT,
                         DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT,
                         DocumentProcessingValues::BUSINESS_TYPE_KBIS,
+                        DocumentProcessingValues::BUSINESS_TYPE_INPI,
+                        DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION,
                         DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE,
                         DocumentProcessingValues::BUSINESS_TYPE_MSA,
                         DocumentProcessingValues::BUSINESS_TYPE_AUTRE,
@@ -58,49 +60,9 @@ class DocumentSchemaFactory
             DocumentProcessingValues::BUSINESS_TYPE_CREW_CARD => $this->identityDocumentSchema(DocumentProcessingValues::BUSINESS_TYPE_CREW_CARD),
             DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT => $this->identityDocumentSchema(DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT),
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => $this->identityDocumentSchema(DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT),
-            DocumentProcessingValues::BUSINESS_TYPE_KBIS => [
-                'type' => 'object',
-                'properties' => [
-                    'document_type' => ['type' => 'string', 'enum' => [DocumentProcessingValues::BUSINESS_TYPE_KBIS]],
-                    'company_name' => ['type' => 'string'],
-                    'trade_name' => ['type' => 'string'],
-                    'legal_form' => ['type' => 'string'],
-                    'capital' => ['type' => 'string'],
-                    'registration_number' => ['type' => 'string'],
-                    'siret' => ['type' => 'string'],
-                    'sirene' => ['type' => 'string'],
-                    'street_address' => ['type' => 'string'],
-                    'postal_code' => ['type' => 'string'],
-                    'city' => ['type' => 'string'],
-                    'naf_code' => ['type' => 'string'],
-                    'registration_date' => ['type' => 'string'],
-                    'registry_city' => ['type' => 'string'],
-                    'legal_representatives' => [
-                        'type' => 'array',
-                        'items' => [
-                            'type' => 'object',
-                            'properties' => [
-                                'entity_type' => ['type' => 'string', 'enum' => ['person', 'company']],
-                                'company_name' => ['type' => 'string'],
-                                'legal_form' => ['type' => 'string'],
-                                'civility' => ['type' => 'string'],
-                                'first_name' => ['type' => 'string'],
-                                'last_name' => ['type' => 'string'],
-                                'street_address' => ['type' => 'string'],
-                                'postal_code' => ['type' => 'string'],
-                                'city' => ['type' => 'string'],
-                                'registration_number' => ['type' => 'string'],
-                                'registry_city' => ['type' => 'string'],
-                                'role' => ['type' => 'string'],
-                            ],
-                            'required' => ['entity_type', 'company_name', 'legal_form', 'civility', 'first_name', 'last_name', 'street_address', 'postal_code', 'city', 'registration_number', 'registry_city', 'role'],
-                            'additionalProperties' => false,
-                        ],
-                    ],
-                ],
-                'required' => ['document_type', 'company_name', 'trade_name', 'legal_form', 'capital', 'registration_number', 'siret', 'sirene', 'street_address', 'postal_code', 'city', 'naf_code', 'registration_date', 'registry_city', 'legal_representatives'],
-                'additionalProperties' => false,
-            ],
+            DocumentProcessingValues::BUSINESS_TYPE_KBIS => $this->companyExtractSchema(DocumentProcessingValues::BUSINESS_TYPE_KBIS),
+            DocumentProcessingValues::BUSINESS_TYPE_INPI => $this->companyExtractSchema(DocumentProcessingValues::BUSINESS_TYPE_INPI),
+            DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION => $this->companyExtractSchema(DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION),
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => [
                 'type' => 'object',
                 'properties' => [
@@ -208,6 +170,56 @@ class DocumentSchemaFactory
                 'city' => ['type' => 'string'],
             ],
             'required' => ['document_type', 'first_name', 'last_name', 'date_of_birth', 'place_of_birth', 'document_number', 'expiry_date', 'nationality', 'sex', 'mrz', 'street_address', 'postal_code', 'city'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function companyExtractSchema(string $documentType): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'document_type' => ['type' => 'string', 'enum' => [$documentType]],
+                'company_name' => ['type' => 'string'],
+                'trade_name' => ['type' => 'string'],
+                'legal_form' => ['type' => 'string'],
+                'capital' => ['type' => 'string'],
+                'registration_number' => ['type' => 'string'],
+                'siret' => ['type' => 'string'],
+                'sirene' => ['type' => 'string'],
+                'street_address' => ['type' => 'string'],
+                'postal_code' => ['type' => 'string'],
+                'city' => ['type' => 'string'],
+                'naf_code' => ['type' => 'string'],
+                'registration_date' => ['type' => 'string'],
+                'registry_city' => ['type' => 'string'],
+                'legal_representatives' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'entity_type' => ['type' => 'string', 'enum' => ['person', 'company']],
+                            'company_name' => ['type' => 'string'],
+                            'legal_form' => ['type' => 'string'],
+                            'civility' => ['type' => 'string'],
+                            'first_name' => ['type' => 'string'],
+                            'last_name' => ['type' => 'string'],
+                            'street_address' => ['type' => 'string'],
+                            'postal_code' => ['type' => 'string'],
+                            'city' => ['type' => 'string'],
+                            'registration_number' => ['type' => 'string'],
+                            'registry_city' => ['type' => 'string'],
+                            'role' => ['type' => 'string'],
+                        ],
+                        'required' => ['entity_type', 'company_name', 'legal_form', 'civility', 'first_name', 'last_name', 'street_address', 'postal_code', 'city', 'registration_number', 'registry_city', 'role'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => ['document_type', 'company_name', 'trade_name', 'legal_form', 'capital', 'registration_number', 'siret', 'sirene', 'street_address', 'postal_code', 'city', 'naf_code', 'registration_date', 'registry_city', 'legal_representatives'],
             'additionalProperties' => false,
         ];
     }

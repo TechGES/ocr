@@ -286,11 +286,15 @@ class DocumentProcessor
 
         if (
             $documentType !== DocumentProcessingValues::BUSINESS_TYPE_KBIS
+            && $documentType !== DocumentProcessingValues::BUSINESS_TYPE_INPI
+            && $documentType !== DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION
             && ! $this->isNegatedMention($loweredReason, 'kbis')
+            && ! $this->isNegatedMention($loweredReason, 'inpi')
+            && ! $this->isNegatedMention($loweredReason, 'acte de situation')
             && ! $this->isNegatedMention($loweredReason, 'registre du commerce')
             && ! $this->isNegatedMention($loweredReason, 'siret')
             && ! $this->isNegatedMention($loweredReason, 'sirene')
-            && preg_match('/\b(kbis|registre du commerce|siret|sirene)\b/u', $loweredReason) === 1
+            && preg_match('/\b(kbis|inpi|acte de situation|registre du commerce|siret|sirene)\b/u', $loweredReason) === 1
         ) {
             if ($reviewReason !== '') {
                 $messages[] = $reviewReason;

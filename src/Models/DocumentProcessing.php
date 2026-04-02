@@ -48,6 +48,10 @@ class DocumentProcessing extends Model
 
     public const BUSINESS_TYPE_KBIS = DocumentProcessingValues::BUSINESS_TYPE_KBIS;
 
+    public const BUSINESS_TYPE_INPI = DocumentProcessingValues::BUSINESS_TYPE_INPI;
+
+    public const BUSINESS_TYPE_ACTE_DE_SITUATION = DocumentProcessingValues::BUSINESS_TYPE_ACTE_DE_SITUATION;
+
     public const BUSINESS_TYPE_ACTE_PROPRIETE = DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE;
 
     public const BUSINESS_TYPE_MSA = DocumentProcessingValues::BUSINESS_TYPE_MSA;

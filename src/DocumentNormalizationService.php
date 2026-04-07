@@ -202,6 +202,7 @@ class DocumentNormalizationService
             'city' => $address['city'],
             'naf_code' => $this->firstStringValue($payload, ['naf_code', 'code_naf']),
             'registration_date' => $this->normalizeDate($this->firstStringValue($payload, ['registration_date', 'date_immatriculation'])),
+            'issue_date' => $this->normalizeDate($this->firstStringValue($payload, ['issue_date', 'date_edition', 'date_extrait', 'extract_date'])),
             'registry_city' => $this->firstStringValue($payload, ['registry_city', 'greffe']),
             'legal_representatives' => array_values(array_filter($representants, function (array $representant): bool {
                 return $representant['company_name'] !== '' || $representant['first_name'] !== '' || $representant['last_name'] !== '' || $representant['role'] !== '';

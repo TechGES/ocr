@@ -155,7 +155,10 @@ class DocumentExtractor
                 "Le sirene correspond aux 9 chiffres de la ligne R.C.S., avant 'R.C.S.' et avant la ville.\n".
                 "N utilise jamais le numero d identification europeen pour remplir sirene.\n".
                 "N utilise jamais une autre suite de chiffres voisine pour remplir sirene.\n".
-                "Pour les extraits societe, extrais siret uniquement s il apparait explicitement comme SIRET sur le document. N utilise jamais l Immatriculation RCS pour remplir siret.\n",
+                "Pour les extraits societe, extrais siret uniquement s il apparait explicitement comme SIRET sur le document. N utilise jamais l Immatriculation RCS pour remplir siret.\n".
+                "issue_date correspond a la date d edition ou de mise a jour de l extrait, par exemple 'Extrait d immatriculation principale au registre du commerce et des societes a jour au 25 juin 2025' implique issue_date='2025-06-25'.\n".
+                "Ne confonds jamais issue_date avec registration_date: registration_date est la date d immatriculation de la societe, issue_date est la date d edition du document.\n".
+                "issue_date doit etre retourne au format YYYY-MM-DD.\n",
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => "Il s agit toujours d un acte de propriete de terrain francais, pas d un acte de propriete generique.\n".
                 "Extrais uniquement les informations suivantes: cadastral_parcels et owners.\n".
                 "Chaque element de cadastral_parcels doit representer une parcelle cadastrale distincte.\n".

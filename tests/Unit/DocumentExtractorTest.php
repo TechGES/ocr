@@ -47,6 +47,7 @@ it('enforces the KBIS representative contract and French KBIS registration guida
                 'city' => '',
                 'naf_code' => '',
                 'registration_date' => '',
+                'issue_date' => '',
                 'registry_city' => '',
                 'legal_representatives' => [],
             ];

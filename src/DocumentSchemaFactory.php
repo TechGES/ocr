@@ -195,6 +195,7 @@ class DocumentSchemaFactory
                 'city' => ['type' => 'string'],
                 'naf_code' => ['type' => 'string'],
                 'registration_date' => ['type' => 'string'],
+                'issue_date' => ['type' => 'string'],
                 'registry_city' => ['type' => 'string'],
                 'legal_representatives' => [
                     'type' => 'array',
@@ -219,7 +220,7 @@ class DocumentSchemaFactory
                     ],
                 ],
             ],
-            'required' => ['document_type', 'company_name', 'trade_name', 'legal_form', 'capital', 'registration_number', 'siret', 'sirene', 'street_address', 'postal_code', 'city', 'naf_code', 'registration_date', 'registry_city', 'legal_representatives'],
+            'required' => ['document_type', 'company_name', 'trade_name', 'legal_form', 'capital', 'registration_number', 'siret', 'sirene', 'street_address', 'postal_code', 'city', 'naf_code', 'registration_date', 'issue_date', 'registry_city', 'legal_representatives'],
             'additionalProperties' => false,
         ];
     }
@@ -254,6 +255,7 @@ class DocumentSchemaFactory
                 'sirene' => ['type' => 'string'],
                 'naf_code' => ['type' => 'string'],
                 'registration_date' => ['type' => 'string'],
+                'issue_date' => ['type' => 'string'],
                 'registry_city' => ['type' => 'string'],
                 'legal_representatives' => [
                     'type' => 'array',
@@ -347,6 +349,7 @@ class DocumentSchemaFactory
                 'sirene',
                 'naf_code',
                 'registration_date',
+                'issue_date',
                 'registry_city',
                 'legal_representatives',
                 'cadastral_parcels',

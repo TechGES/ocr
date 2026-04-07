@@ -56,6 +56,7 @@ it('analyzes a document in one structured openai request', function () {
                     'sirene' => '123456789',
                     'naf_code' => '',
                     'registration_date' => '',
+                    'issue_date' => '',
                     'registry_city' => '',
                     'legal_representatives' => [],
                     'cadastral_parcels' => [],

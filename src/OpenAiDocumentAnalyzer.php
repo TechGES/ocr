@@ -77,6 +77,9 @@ class OpenAiDocumentAnalyzer
             "Pour tous les champs de date, retourne YYYY-MM-DD si la date est lisible avec confiance, sinon une chaine vide.\n".
             "Pour les adresses, retourne street_address sans code postal ni ville, postal_code separe, city separee.\n".
             "Pour les documents d identite, first_name contient tous les prenoms et last_name uniquement le nom de famille.\n".
+            "Si un nom d usage, nom d epouse, nom d epoux ou nom marital est visible sur un document d identite, retourne-le dans usage_name sans remplacer last_name.\n".
+            "Exemple: 'Nom: TESTU Epouse: MONTRIEUX' doit donner last_name='TESTU' et usage_name='MONTRIEUX'.\n".
+            "Si aucun nom d usage n est visible, retourne usage_name vide si le champ existe dans le schema.\n".
             "Si une MRZ est visible, utilise-la pour corriger ou completer les champs d identite et retourne-la brute dans mrz exactement caractere par caractere.\n".
             "Conserve strictement les caracteres '<' et les separateurs '<<' dans la MRZ.\n".
             "Pour les extraits societe de type KBIS, INPI ou acte de situation, registration_number doit reprendre la valeur brute de l Immatriculation RCS et sirene doit contenir exactement 9 chiffres.\n".

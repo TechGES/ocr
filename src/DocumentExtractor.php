@@ -100,6 +100,10 @@ class DocumentExtractor
             DocumentProcessingValues::BUSINESS_TYPE_TRAVEL_DOCUMENT,
             DocumentProcessingValues::BUSINESS_TYPE_OTHER_IDENTITY_DOCUMENT => "Pour les documents d identite, first_name doit contenir tous les prenoms exacts dans l ordre du document.\n".
                 "Pour les documents d identite, last_name doit contenir uniquement le nom de famille exact, sans prenom supplementaire.\n".
+                "Si un nom d usage, nom d epouse, nom d epoux ou nom marital est visible, retourne-le dans usage_name sans remplacer last_name.\n".
+                "Si le document contient une mention comme 'epouse', 'epoux', 'nee', 'nom d usage' ou 'nom marital', conserve last_name avec le nom principal et mets uniquement le nom d usage dans usage_name.\n".
+                "Exemple: 'Nom: TESTU Epouse: MONTRIEUX' doit donner last_name='TESTU' et usage_name='MONTRIEUX'.\n".
+                "Si aucun nom d usage n est visible, retourne usage_name vide si le champ existe dans le schema.\n".
                 "Les champs first_name et last_name sont obligatoirement separes: ne laisse jamais last_name vide si le nom du titulaire est visible.\n".
                 "Ne deplace jamais une partie du nom de famille dans first_name et ne deplace jamais un prenom dans last_name.\n".
                 "Si plusieurs prenoms sont presents, y compris sur plusieurs lignes, retourne-les tous dans first_name dans l ordre exact du document.\n".

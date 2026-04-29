@@ -158,6 +158,7 @@ class DocumentSchemaFactory
                 'document_type' => ['type' => 'string', 'enum' => [$documentType]],
                 'first_name' => ['type' => 'string'],
                 'last_name' => ['type' => 'string'],
+                'usage_name' => ['type' => 'string'],
                 'date_of_birth' => ['type' => 'string'],
                 'place_of_birth' => ['type' => 'string'],
                 'document_number' => ['type' => 'string'],
@@ -169,7 +170,7 @@ class DocumentSchemaFactory
                 'postal_code' => ['type' => 'string'],
                 'city' => ['type' => 'string'],
             ],
-            'required' => ['document_type', 'first_name', 'last_name', 'date_of_birth', 'place_of_birth', 'document_number', 'expiry_date', 'nationality', 'sex', 'mrz', 'street_address', 'postal_code', 'city'],
+            'required' => ['document_type', 'first_name', 'last_name', 'usage_name', 'date_of_birth', 'place_of_birth', 'document_number', 'expiry_date', 'nationality', 'sex', 'mrz', 'street_address', 'postal_code', 'city'],
             'additionalProperties' => false,
         ];
     }
@@ -236,6 +237,7 @@ class DocumentSchemaFactory
                 'document_type' => $this->classificationSchema()['properties']['document_type'],
                 'first_name' => ['type' => 'string'],
                 'last_name' => ['type' => 'string'],
+                'usage_name' => ['type' => 'string'],
                 'date_of_birth' => ['type' => 'string'],
                 'place_of_birth' => ['type' => 'string'],
                 'document_number' => ['type' => 'string'],
@@ -330,6 +332,7 @@ class DocumentSchemaFactory
                 'document_type',
                 'first_name',
                 'last_name',
+                'usage_name',
                 'date_of_birth',
                 'place_of_birth',
                 'document_number',

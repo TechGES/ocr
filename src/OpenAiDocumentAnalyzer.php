@@ -83,7 +83,10 @@ class OpenAiDocumentAnalyzer
             "Si une MRZ est visible, utilise-la pour corriger ou completer les champs d identite et retourne-la brute dans mrz exactement caractere par caractere.\n".
             "Conserve strictement les caracteres '<' et les separateurs '<<' dans la MRZ.\n".
             "Pour les extraits societe de type KBIS, INPI ou acte de situation, registration_number doit reprendre la valeur brute de l Immatriculation RCS et sirene doit contenir exactement 9 chiffres.\n".
-            "Pour les extraits societe, issue_date correspond a la date d edition ou de mise a jour de l extrait, par exemple 'Extrait d immatriculation principale au registre du commerce et des societes a jour au 25 juin 2025' implique issue_date='2025-06-25'.\n".
+            "Pour les documents INPI, issue_date doit correspondre en priorite a la date indiquee dans la formule 'a la date du ...'.\n".
+            "Pour les documents INPI, n utilise jamais la date de mise a jour de l entreprise, la date de debut d activite, la date d immatriculation ou une date presente dans l historique.\n".
+            "Pour les documents KBIS et acte de situation, issue_date correspond a la date d edition ou a la mention 'a jour au ...'.\n".
+            "Exemple KBIS: 'Extrait d immatriculation principale au registre du commerce et des societes a jour au 25 juin 2025' implique issue_date='2025-06-25'.\n".
             "Ne confonds jamais issue_date avec registration_date: registration_date est la date d immatriculation de la societe, issue_date est la date d edition du document.\n".
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".

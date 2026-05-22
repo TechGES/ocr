@@ -18,7 +18,7 @@ it('uses an identity-document OCR prompt for vision transcription', function () 
         });
 
     $transcriber = new VisionDocumentTranscriber($ollamaClient);
-    $transcriber->transcribeImages([dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cin.webp']);
+    $transcriber->transcribeImages([dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cnie.jpg']);
 
     expect($capturedContent)
         ->toContain('Tu es un agent OCR specialise dans la lecture de cartes d identite')
@@ -44,7 +44,7 @@ it('uses a dedicated MRZ-only OCR prompt', function () {
         });
 
     $transcriber = new VisionDocumentTranscriber($ollamaClient);
-    $transcriber->extractMrzFromImages([dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cin.webp']);
+    $transcriber->extractMrzFromImages([dirname(__DIR__, 2).'/tests/Fixtures/documents/cin/cnie.jpg']);
 
     expect($capturedContent)
         ->toContain('Tu es un agent OCR specialise uniquement dans la lecture de MRZ')

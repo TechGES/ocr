@@ -87,6 +87,10 @@ class OpenAiDocumentAnalyzer
             "Pour les attestations INPI / RNE, issue_date correspond en priorite a la date presente dans la phrase d en-tete 'concernant l entreprise ... a la date du ...'. Exemple: 'concernant l entreprise DUFAYET a la date du 29 avril 2026' implique issue_date='2026-04-29'.\n".
             "Pour les attestations INPI / RNE, ne prends jamais 'Date de mise a jour de l entreprise' comme issue_date si une phrase 'a la date du ...' est presente.\n".
             "Ne confonds jamais issue_date avec registration_date: registration_date est la date d immatriculation de la societe, issue_date est la date d edition ou de situation du document.\n".
+            "Pour les attestations INPI / RNE d entrepreneur individuel, la ligne 'Nom, Prenom(s)' correspond a l entrepreneur.\n".
+            "Pour un entrepreneur individuel, l entrepreneur est aussi le representant legal: ajoute une entree dans legal_representatives avec entity_type='person'.\n".
+            "Exemple: 'Nom, Prenom(s) : MURAIL EMMANUEL, THIERRY, HUGUES' implique legal_representatives[0].last_name='MURAIL' et legal_representatives[0].first_name='EMMANUEL THIERRY HUGUES'.\n".
+            "Ne laisse jamais legal_representatives vide si un entrepreneur individuel contient une ligne 'Nom, Prenom(s)' exploitable.\n".
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
             "Pour les documents MSA, traite toutes les pages fournies et retourne toutes les lignes visibles du tableau, meme s il y en a plus de 200.\n".

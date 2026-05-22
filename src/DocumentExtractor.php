@@ -165,6 +165,10 @@ class DocumentExtractor
                 "Pour les attestations INPI / RNE, ne prends jamais 'Date de mise a jour de l entreprise' comme issue_date si une phrase 'a la date du ...' est presente.\n".
                 "Ne confonds jamais issue_date avec registration_date: registration_date est la date d immatriculation de la societe, issue_date est la date d edition ou de situation du document.\n".
                 "issue_date doit etre retourne au format YYYY-MM-DD.\n",
+                "Pour les attestations INPI / RNE d entrepreneur individuel, la ligne 'Nom, Prenom(s)' correspond a l entrepreneur.\n".
+                "Pour un entrepreneur individuel, l entrepreneur est aussi le representant legal: ajoute une entree dans legal_representatives avec entity_type='person'.\n".
+                "Exemple: 'Nom, Prenom(s) : MURAIL EMMANUEL, THIERRY, HUGUES' implique legal_representatives[0].last_name='MURAIL' et legal_representatives[0].first_name='EMMANUEL THIERRY HUGUES'.\n".
+                "Ne laisse jamais legal_representatives vide si un entrepreneur individuel contient une ligne 'Nom, Prenom(s)' exploitable.\n".
             DocumentProcessingValues::BUSINESS_TYPE_ACTE_PROPRIETE => "Il s agit toujours d un acte de propriete de terrain francais, pas d un acte de propriete generique.\n".
                 "Extrais uniquement les informations suivantes: cadastral_parcels et owners.\n".
                 "Chaque element de cadastral_parcels doit representer une parcelle cadastrale distincte.\n".

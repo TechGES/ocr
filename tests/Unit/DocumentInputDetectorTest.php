@@ -35,8 +35,8 @@ it('detects the technical input type from real document fixtures', function (
     expect($result['extracted_text'])->toBeNull();
 })->with([
     'cin image' => [
-        'relativePath' => 'tests/Fixtures/documents/cin/cnie.jpg',
-        'mimeType' => 'image/jpeg',
+        'relativePath' => 'tests/Fixtures/documents/cin/cin.webp',
+        'mimeType' => 'image/webp',
         'expectedInputType' => DocumentProcessing::INPUT_TYPE_IMAGE,
         'expectedPagesCount' => 1,
         'shouldExposeExtractedText' => false,
@@ -56,19 +56,19 @@ it('detects the technical input type from real document fixtures', function (
         'shouldExposeExtractedText' => true,
     ],
     'text land deed pdf' => [
-        'relativePath' => 'tests/Fixtures/documents/acte_propriete/Titre de propriété.pdf',
+        'relativePath' => 'tests/Fixtures/documents/acte_propriete/Titre de propriété.pdf',
         'mimeType' => 'application/pdf',
         'expectedInputType' => DocumentProcessing::INPUT_TYPE_PDF_TEXT,
         'expectedPagesCount' => 1,
         'shouldExposeExtractedText' => true,
     ],
-    // 'scan cin pdf' => [
-    //     'relativePath' => 'tests/Fixtures/documents/cin/cin_Thierry Gaurenne.pdf',
-    //     'mimeType' => 'application/pdf',
-    //     'expectedInputType' => DocumentProcessing::INPUT_TYPE_PDF_SCAN,
-    //     'expectedPagesCount' => null,
-    //     'shouldExposeExtractedText' => false,
-    // ],
+    'scan cin pdf' => [
+        'relativePath' => 'tests/Fixtures/documents/cin/cin_Thierry Gaurenne.pdf',
+        'mimeType' => 'application/pdf',
+        'expectedInputType' => DocumentProcessing::INPUT_TYPE_PDF_SCAN,
+        'expectedPagesCount' => null,
+        'shouldExposeExtractedText' => false,
+    ],
     'scan kbis pdf' => [
         'relativePath' => 'tests/Fixtures/documents/kbis/infonet.pdf',
         'mimeType' => 'application/pdf',

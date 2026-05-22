@@ -73,7 +73,7 @@ it('processes land-title deed fixtures with stable expected values', function (
         ],
     ],
     'land title pdf' => [
-        'relativePath' => 'tests/Fixtures/documents/acte_propriete/Titre de propriété.pdf',
+        'relativePath' => 'tests/Fixtures/documents/acte_propriete/titre_de_propriete.pdf',
         'expectedInputType' => DocumentProcessing::INPUT_TYPE_PDF_TEXT,
         'expectedParcels' => [
             [

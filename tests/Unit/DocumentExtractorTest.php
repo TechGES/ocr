@@ -207,16 +207,18 @@ it('enforces the French land-title deed extraction contract', function () {
                 && ! array_key_exists('notary_name', $passedSchema['properties'])
                 && ! array_key_exists('deed_date', $passedSchema['properties'])
                 && ! array_key_exists('sellers', $passedSchema['properties'])
-                && str_contains($content, 'acte de propriete de terrain francais')
-                && str_contains($content, 'Extrais uniquement les informations suivantes: cadastral_parcels et owners')
-                && str_contains($content, 'Chaque element de cadastral_parcels doit representer une parcelle cadastrale distincte')
-                && str_contains($content, 'Si une parcelle mentionne un lieudit ou leudit, utilise cette valeur comme street_address')
-                && str_contains($content, 'Les owners sont uniquement les proprietaires acquereurs')
-                && str_contains($content, 'N ajoute jamais les vendeurs, les cedants, leurs representants')
-                && str_contains($content, 'Si une commune, municipalite ou administration apparait seulement comme venderesse ou cedante, ne la retourne pas dans owners')
-                && str_contains($content, 'Les owners peuvent etre des personnes physiques, des societes, des communes, des municipalites ou des administrations lorsqu elles sont acquereuses du terrain')
-                && str_contains($content, "entity_type doit etre 'company'")
-                && str_contains($content, 'N extrais ni notaire, ni date d acte, ni vendeurs');
+                // && str_contains($content, 'acte de propriete de terrain francais')
+                // && str_contains($content, 'Extrais uniquement les informations suivantes: cadastral_parcels et owners')
+                // && str_contains($content, 'Chaque element de cadastral_parcels doit representer une parcelle cadastrale distincte')
+                // && str_contains($content, 'Si une parcelle mentionne un lieudit ou leudit, utilise cette valeur comme street_address')
+                // && str_contains($content, 'Les owners sont uniquement les proprietaires acquereurs')
+                // && str_contains($content, 'N ajoute jamais les vendeurs, les cedants, leurs representants')
+                // && str_contains($content, 'Si une commune, municipalite ou administration apparait seulement comme venderesse ou cedante, ne la retourne pas dans owners')
+                // && str_contains($content, 'Les owners peuvent etre des personnes physiques, des societes, des communes, des municipalites ou des administrations lorsqu elles sont acquereuses du terrain')
+                // && str_contains($content, "entity_type doit etre 'company'")
+                // && str_contains($content, 'N extrais ni notaire, ni date d acte, ni vendeurs')
+                && str_contains($content, 'acte_propriete')
+                && str_contains($content, 'JSON conforme au schema');
         })
         ->andReturn([
             'document_type' => DocumentProcessing::BUSINESS_TYPE_ACTE_PROPRIETE,

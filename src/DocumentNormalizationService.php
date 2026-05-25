@@ -178,15 +178,43 @@ class DocumentNormalizationService
             $this->firstStringValue($payload, ['city'])
         );
 
+        $representantPayloads = is_array($payload['legal_representatives'] ?? null)
+            ? $payload['legal_representatives']
+            : (is_array($payload['representants_legaux'] ?? null) ? $payload['representants_legaux'] : []);
+
         $representants = array_map(
-            fn (mixed $representant): array => $this->normalizePerson(
-                is_array($representant) ? $representant : [],
-                roleKeys: ['role', 'qualite']
+            fn (mixed $representant): array => $this->normalizeCompanyRepresentative(
+                is_array($representant) ? $representant : []
             ),
-            is_array($payload['legal_representatives'] ?? null)
-                ? $payload['legal_representatives']
-                : (is_array($payload['representants_legaux'] ?? null) ? $payload['representants_legaux'] : [])
+            $representantPayloads
         );
+
+        $rootFirstName = $this->firstStringValue($payload, ['first_name', 'prenom']);
+        $rootLastName = $this->firstStringValue($payload, ['last_name', 'nom']);
+
+        if ($representants === [] && $rootFirstName !== '' && $rootLastName !== '') {
+            $representants[] = $this->normalizeCompanyRepresentative([
+                'entity_type' => 'person',
+                'first_name' => $rootFirstName,
+                'last_name' => $rootLastName,
+                'role' => 'Représentant légal',
+            ]);
+        }
+
+        if (
+            $documentType === DocumentProcessingValues::BUSINESS_TYPE_INPI
+            && $representants === []
+            && $this->firstStringValue($payload, ['first_name', 'prenom']) !== ''
+            && $this->firstStringValue($payload, ['last_name', 'nom']) !== ''
+        ) {
+            $representants[] = [
+                'entity_type' => 'person',
+                'company_name' => $this->firstStringValue($payload, ['company_name', 'raison_sociale']),
+                'first_name' => $this->normalizePersonNameValue($this->firstStringValue($payload, ['first_name', 'prenom'])),
+                'last_name' => $this->normalizePersonNameValue($this->firstStringValue($payload, ['last_name', 'nom'])),
+                'role' => 'Représentant légal',
+            ];
+        }
 
         return [
             'document_type' => $documentType,
@@ -208,6 +236,30 @@ class DocumentNormalizationService
                 return $representant['company_name'] !== '' || $representant['first_name'] !== '' || $representant['last_name'] !== '' || $representant['role'] !== '';
             })),
         ];
+    }
+
+    private function normalizeCompanyRepresentative(array $payload): array
+    {
+        if (($payload['entity_type'] ?? '') === 'person') {
+            return [
+                'entity_type' => 'person',
+                'company_name' => '',
+                'legal_form' => '',
+                'civility' => $this->firstStringValue($payload, ['civility']),
+                'first_name' => $this->normalizePersonNameValue($this->firstStringValue($payload, ['first_name', 'prenom'])),
+                'last_name' => $this->normalizePersonNameValue($this->firstStringValue($payload, ['last_name', 'nom'])),
+                'date_of_birth' => $this->normalizeDate($this->firstStringValue($payload, ['date_of_birth', 'date_naissance'])),
+                'street_address' => '',
+                'postal_code' => '',
+                'city' => '',
+                'registration_number' => '',
+                'registry_city' => '',
+                'share' => '',
+                'role' => $this->firstStringValue($payload, ['role', 'qualite'], 'Représentant légal'),
+            ];
+        }
+
+        return $this->normalizePerson($payload, roleKeys: ['role', 'qualite']);
     }
 
     /**

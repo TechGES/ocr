@@ -56,7 +56,7 @@ it('detects the technical input type from real document fixtures', function (
         'shouldExposeExtractedText' => true,
     ],
     'text land deed pdf' => [
-        'relativePath' => 'tests/Fixtures/documents/acte_propriete/Titre de propriété.pdf',
+        'relativePath' => 'tests/Fixtures/documents/acte_propriete/titre_de_propriete.pdf',
         'mimeType' => 'application/pdf',
         'expectedInputType' => DocumentProcessing::INPUT_TYPE_PDF_TEXT,
         'expectedPagesCount' => 1,

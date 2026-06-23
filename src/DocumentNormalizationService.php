@@ -317,6 +317,44 @@ class DocumentNormalizationService
     }
 
     /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaOutlierDepartments(array $rows): array
+    {
+        $deptCounts = [];
+
+        foreach ($rows as $row) {
+            $dept = $row['dept'] ?? '';
+
+            if ($dept === '') {
+                continue;
+            }
+
+            $deptCounts[$dept] = ($deptCounts[$dept] ?? 0) + 1;
+        }
+
+        arsort($deptCounts);
+
+        $dominantDeptKey = array_key_first($deptCounts);
+        $dominantDept = $dominantDeptKey !== null ? (string) $dominantDeptKey : null;
+
+        if ($dominantDept === null || ($deptCounts[$dominantDept] ?? 0) < 3) {
+            return $rows;
+        }
+
+        return array_map(function (array $row) use ($deptCounts, $dominantDept): array {
+            $dept = (string) ($row['dept'] ?? '');
+
+            if ($dept === '' || ($dept !== $dominantDept && ($deptCounts[$dept] ?? 0) === 1)) {
+                $row['dept'] = (string) $dominantDept;
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
@@ -331,56 +369,55 @@ class DocumentNormalizationService
         $lastDept = '';
         $lastCom = '';
         $rows = [];
-        $seen = [];
 
         foreach ($parcelPayloads as $parcelPayload) {
             $rowPayload = is_array($parcelPayload) ? $parcelPayload : [];
 
-            $dept = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['dept', 'departement']), 2);
-            $com = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['com', 'commune']), 3);
-            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
-            $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
-            $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
+            $rawDept = trim($this->firstStringValue($rowPayload, ['dept', 'departement']));
+            $rawCom = trim($this->firstStringValue($rowPayload, ['com', 'commune']));
+
+            $dept = preg_match('/^\d{1,2}$/', $rawDept) === 1
+                ? $this->normalizeFixedDigits($rawDept, 2)
+                : '';
+
+            $com = preg_match('/^\d{1,3}$/', $rawCom) === 1
+                ? $this->normalizeFixedDigits($rawCom, 3)
+                : '';
 
             if ($dept === '') {
                 $dept = $lastDept;
-            } else {
-                $lastDept = $dept;
             }
 
             if ($com === '') {
                 $com = $lastCom;
-            } else {
+            }
+
+            if ($dept !== '') {
+                $lastDept = $dept;
+            }
+
+            if ($com !== '') {
                 $lastCom = $com;
             }
+
+            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
+            $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
+            $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
 
             if ($dept === '' && $com === '' && $prefixe === '' && $section === '' && $numeroPlan === '') {
                 continue;
             }
 
-            $record = [
+            $rows[] = [
                 'dept' => $dept,
                 'com' => $com,
                 'prefixe' => $prefixe,
                 'section' => $section,
                 'numero_plan' => $numeroPlan,
             ];
-
-            $dedupeKey = implode('.', [
-                $record['dept'],
-                $record['com'],
-                $record['prefixe'],
-                $record['section'],
-                $record['numero_plan'],
-            ]);
-
-            if (isset($seen[$dedupeKey])) {
-                continue;
-            }
-
-            $seen[$dedupeKey] = true;
-            $rows[] = $record;
         }
+
+        $rows = $this->normalizeMsaOutlierDepartments($rows);
 
         return [
             'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,

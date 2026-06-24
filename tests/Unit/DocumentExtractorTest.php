@@ -247,15 +247,15 @@ it('enforces the MSA parcel-table extraction contract', function () {
                 && str_contains($content, 'tableau MSA de parcelles cadastrales')
                 && str_contains($content, 'Extrais uniquement les informations suivantes: msa_parcels')
                 && str_contains($content, 'Chaque element de msa_parcels doit representer exactement une ligne de parcelle du tableau visible')
-                && str_contains($content, 'DEPT correspond a la colonne 1')
-                && str_contains($content, 'COM correspond a la colonne 2')
-                && str_contains($content, 'PREFIXE correspond a la colonne 6')
-                && str_contains($content, 'SECTION correspond a la colonne 7')
-                && str_contains($content, 'NUMERO PLAN correspond a la colonne 8')
-                && str_contains($content, 'Ignore strictement les colonnes 3, 4 et 5')
-                && str_contains($content, "85 006 L 00160 ... B 0357")
-                && str_contains($content, "85 055 B 00143 O ... ZI 0030")
-                && str_contains($content, 'la normalisation applicative reportera la derniere valeur connue');
+                && str_contains($content, 'Lis uniquement les colonnes cadastrales utiles: DEPT, COM, PREFIXE, SECTION et NUMERO PLAN')
+                && str_contains($content, 'Ne confonds jamais les colonnes COMPTES PROPRIETAIRES avec les colonnes de parcelle')
+                && str_contains($content, "D 00225")
+                && str_contains($content, "C 00100")
+                && str_contains($content, "72 050 D 00225 ZX 0023 01 P")
+                && str_contains($content, "72 083 C 00100 ZS 0029 A 01 J")
+                && str_contains($content, "ZZ 0004 AJ 01 T")
+                && str_contains($content, "ZS 0005 AJ 02 P")
+                && str_contains($content, 'Ne t\'arrete pas au premier total intermediaire');
         })
         ->andReturn([
             'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,

@@ -14,6 +14,237 @@ class OpenAiDocumentAnalyzer
     ) {}
 
     /**
+     * @param  array<int, mixed>  $llmParcels
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
+     * @return array<int, mixed>
+     */
+    private function mergeMsaParcels(array $llmParcels, array $textParcels): array
+    {
+        $textParcelsByOccurrenceKey = [];
+
+        foreach ($textParcels as $textParcel) {
+            $occurrenceKey = $this->msaParcelOccurrenceKey($textParcel);
+            $textParcelsByOccurrenceKey[$occurrenceKey][] = $textParcel;
+        }
+
+        $merged = [];
+        $mergedCounts = [];
+
+        foreach ($llmParcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey($parcel);
+
+            if (($textParcelsByOccurrenceKey[$occurrenceKey] ?? []) !== []) {
+                $parcel = $this->mergeMsaParcelData(
+                    $parcel,
+                    array_shift($textParcelsByOccurrenceKey[$occurrenceKey])
+                );
+            }
+
+            $key = $this->msaParcelKey($parcel);
+            $mergedCounts[$key] = ($mergedCounts[$key] ?? 0) + 1;
+            $merged[] = $parcel;
+        }
+
+        foreach ($textParcelsByOccurrenceKey as $textParcels) {
+            foreach ($textParcels as $parcel) {
+                $key = $this->msaParcelKey($parcel);
+                $mergedCounts[$key] = ($mergedCounts[$key] ?? 0) + 1;
+                $merged[] = $parcel;
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    private function detectMsaDocumentDept(string $text): string
+    {
+        preg_match_all('/\b(\d{2})\s+\d{3}\s+[A-Z]\s+\d{4}\b/u', mb_strtoupper($text), $matches);
+
+        $counts = [];
+
+        foreach ($matches[1] ?? [] as $dept) {
+            $dept = str_pad((string) $dept, 2, '0', STR_PAD_LEFT);
+            $counts[$dept] = ($counts[$dept] ?? 0) + 1;
+        }
+
+        arsort($counts);
+
+        $dept = array_key_first($counts);
+
+        return $dept !== null ? (string) $dept : '';
+    }
+
+    /**
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function extractMsaParcelsFromText(string $text): array
+    {
+        $rawLines = preg_split('/\R+/u', $text) ?: [];
+        $lines = array_map(fn (string $line): string => $this->normalizeMsaTextLine($line), $rawLines);
+
+        $nextDeptByLine = $this->nextMsaDeptByLine($lines);
+
+        $lastDept = '';
+        $lastCom = '';
+        $parcels = [];
+
+        foreach ($lines as $index => $line) {
+            if ($line === '') {
+                continue;
+            }
+
+            $currentDept = '';
+            $currentCom = '';
+
+            if (preg_match('/\b(\d{2})\s+(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1) {
+                $currentDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+                $currentCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
+            } elseif (preg_match('/\b(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1) {
+                $currentDept = $lastDept !== '' ? $lastDept : ($nextDeptByLine[$index] ?? '');
+                $currentCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
+            }
+
+            if ($currentDept !== '') {
+                $lastDept = $currentDept;
+            }
+
+            if ($currentCom !== '') {
+                $lastCom = $currentCom;
+            }
+
+            preg_match_all(
+                '/\b([A-Z]{1,2})\s*(\d{4})\s+(?:(?:[A-Z]{1,2})\s*)?\d{2}\s*[A-Z]\b/u',
+                $line,
+                $matches,
+                PREG_SET_ORDER
+            );
+
+            foreach ($matches as $match) {
+                $section = mb_strtoupper($match[1]);
+                $numeroPlan = $match[2];
+
+                if (in_array($section, ['DU', 'OU', 'LE', 'LA', 'DE', 'OE', 'RC'], true)) {
+                    continue;
+                }
+
+                if ($numeroPlan === '0000') {
+                    continue;
+                }
+
+                $parcels[] = [
+                    'dept' => $currentDept !== '' ? $currentDept : $lastDept,
+                    'com' => $currentCom !== '' ? $currentCom : $lastCom,
+                    'prefixe' => '',
+                    'section' => $section,
+                    'numero_plan' => $numeroPlan,
+                ];
+            }
+        }
+
+        return $parcels;
+    }
+
+    private function normalizeMsaTextLine(string $line): string
+    {
+        $line = mb_strtoupper($line);
+        $line = strtr($line, [
+            'É' => 'E',
+            'È' => 'E',
+            'Ê' => 'E',
+            'Ë' => 'E',
+            'À' => 'A',
+            'Â' => 'A',
+            'Î' => 'I',
+            'Ï' => 'I',
+            'Ô' => 'O',
+            'Û' => 'U',
+            'Ù' => 'U',
+            'Ç' => 'C',
+        ]);
+
+        $line = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $line) ?? $line;
+
+        return preg_replace('/\s+/u', ' ', trim($line)) ?? trim($line);
+    }
+
+    /**
+     * @param  array<int, string>  $lines
+     * @return array<int, string>
+     */
+    private function nextMsaDeptByLine(array $lines): array
+    {
+        $nextDeptByLine = [];
+        $nextDept = '';
+
+        for ($index = count($lines) - 1; $index >= 0; $index--) {
+            $nextDeptByLine[$index] = $nextDept;
+
+            if (preg_match('/\b(\d{2})\s+\d{3}\s+[A-Z]\s+\d{4}\b/u', $lines[$index], $matches) === 1) {
+                $nextDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+            }
+        }
+
+        return $nextDeptByLine;
+    }
+
+    /**
+     * @param  array<string, mixed>  $llmParcel
+     * @param  array<string, mixed>  $textParcel
+     * @return array<string, mixed>
+     */
+    private function mergeMsaParcelData(array $llmParcel, array $textParcel): array
+    {
+        return [
+            'dept' => trim((string) ($textParcel['dept'] ?? '')) !== ''
+                ? (string) $textParcel['dept']
+                : (string) ($llmParcel['dept'] ?? ''),
+
+            'com' => trim((string) ($textParcel['com'] ?? '')) !== ''
+                ? (string) $textParcel['com']
+                : (string) ($llmParcel['com'] ?? ''),
+
+            'prefixe' => '',
+
+            'section' => trim((string) ($textParcel['section'] ?? '')) !== ''
+                ? (string) $textParcel['section']
+                : (string) ($llmParcel['section'] ?? ''),
+
+            'numero_plan' => trim((string) ($textParcel['numero_plan'] ?? '')) !== ''
+                ? (string) $textParcel['numero_plan']
+                : (string) ($llmParcel['numero_plan'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $parcel
+     */
+    private function msaParcelOccurrenceKey(array $parcel): string
+    {
+        return implode('.', [
+            mb_strtoupper(trim((string) ($parcel['section'] ?? ''))),
+            trim((string) ($parcel['numero_plan'] ?? '')),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $parcel
+     */
+    private function msaParcelKey(array $parcel): string
+    {
+        return implode('.', [
+            trim((string) ($parcel['dept'] ?? '')),
+            trim((string) ($parcel['com'] ?? '')),
+            trim((string) ($parcel['prefixe'] ?? '')),
+            mb_strtoupper(trim((string) ($parcel['section'] ?? ''))),
+            trim((string) ($parcel['numero_plan'] ?? '')),
+        ]);
+    }
+
+    /**
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
     public function analyzeText(string $text): array
@@ -27,7 +258,16 @@ class OpenAiDocumentAnalyzer
             $this->schemaFactory->analysisSchema()
         );
 
-        return $this->normalizeAnalysis($payload);
+        $analysis = $this->normalizeAnalysis($payload);
+
+        if (($analysis['classification']['document_type'] ?? '') === DocumentProcessingValues::BUSINESS_TYPE_MSA) {
+            $analysis['extraction']['msa_parcels'] = $this->mergeMsaParcels(
+                is_array($analysis['extraction']['msa_parcels'] ?? null) ? $analysis['extraction']['msa_parcels'] : [],
+                $this->extractMsaParcelsFromText($text)
+            );
+        }
+
+        return $analysis;
     }
 
     /**
@@ -94,8 +334,37 @@ class OpenAiDocumentAnalyzer
             "Pour les actes de propriete, owners contient uniquement les acquereurs et jamais les vendeurs.\n".
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
             "Pour les documents MSA, traite toutes les pages fournies et retourne toutes les lignes visibles du tableau, meme s il y en a plus de 200.\n".
-            "Pour MSA, lis uniquement les colonnes DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
-            "Pour MSA, ignore strictement les colonnes intermediaires non demandees, meme si elles contiennent des lettres ou nombres comme L, M, B, C, O, 00160, 00193 ou 00143.\n".
+            "Pour MSA, lis uniquement les colonnes cadastrales utiles: DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
+            "Pour MSA, ne confonds jamais les colonnes COMPTES PROPRIETAIRES avec les colonnes de parcelle.\n".
+            "Pour MSA, les groupes comme 'D 00225', 'C 00100', 'D 00068', 'S 00027', 'B 00144' correspondent au compte proprietaire et ne doivent jamais etre retournes comme section ou numero_plan.\n".
+            "Pour MSA, SECTION est generalement la paire alphabetique situee apres le compte proprietaire: exemples ZX, ZS, ZR, ZY, ZZ, ZA, ZD, ZH.\n".
+            "Pour MSA, NUMERO PLAN est le nombre de 4 chiffres situe juste apres SECTION.\n".
+            "Exemple MSA: '72 050 D 00225 ZX 0023 01 P' donne dept='72', com='050', prefixe='', section='ZX', numero_plan='0023'. Il ne faut jamais retourner section='D' ni numero_plan='0225'.\n".
+            "Exemple MSA: '72 083 C 00100 ZS 0029 A 01 J' donne dept='72', com='083', prefixe='', section='ZS', numero_plan='0029'. Il ne faut jamais retourner section='C' ni numero_plan='0100'.\n".
+            "Exemple MSA: '72 083 D 00068 ZR 0002 03 T' donne dept='72', com='083', prefixe='', section='ZR', numero_plan='0002'. Il ne faut jamais retourner section='D' ni numero_plan='0068'.\n".
+            "Pour MSA, ignore strictement les colonnes de compte proprietaire et les colonnes intermediaires non demandees, meme si elles contiennent des lettres ou nombres comme L, M, B, C, D, S, O, 00160, 00193, 00143, 00225 ou 00100.\n".
+            "Pour MSA, certaines parcelles sont subdivisees: la ligne peut contenir SECTION + NUMERO PLAN + suffixe de subdivision + code culture.\n".
+            "Exemples: 'ZZ 0004 AJ 01 T' donne section='ZZ', numero_plan='0004'. Le suffixe 'AJ' et le code culture '01 T' ne doivent pas modifier numero_plan.\n".
+            "Exemples: 'ZZ 0004 AK 02 T' donne encore section='ZZ', numero_plan='0004'. Ne retourne pas ZZ0007 ni ZZ0006.\n".
+            "Exemples: 'ZZ 0018 J 01 T' donne section='ZZ', numero_plan='0018'. Ne retourne pas ZZ0011.\n".
+            "Exemples: 'ZZ 0018 K 02 T' donne encore section='ZZ', numero_plan='0018'. Ne retourne pas ZZ0016.\n".
+            "Exemples: 'ZS 0005 AJ 02 P', 'ZS 0005 AK 03 P' et 'ZS 0005 B 02 T' donnent toutes section='ZS', numero_plan='0005'.\n".
+            "Exemples: 'ZS 0030 J 02 T' et 'ZS 0030 K 03 T' donnent toutes section='ZS', numero_plan='0030'.\n".
+            "Pour MSA, ne construis jamais numero_plan a partir des codes culture ou des suffixes AJ, AK, A, B, J, K.\n".
+            "Pour MSA, ignore les valeurs de compte proprietaire comme '083 D 00114' et '083 S 00027' si elles ne sont pas suivies immediatement d'une vraie section cadastrale.\n".
+            "Pour MSA, si une section + numero_plan apparait plusieurs fois avec des suffixes differents, retourne plusieurs entrees seulement si le schema ne permet pas de stocker le suffixe; elles auront alors le meme section et le meme numero_plan.\n".
+            "Pour MSA, conserve les lignes subdivisees comme des lignes distinctes si le schema ne permet pas de stocker la subdivision. Exemple: 'ZZ 0004 AJ 01 T' et 'ZZ 0004 AK 02 T' doivent produire deux entrees avec section='ZZ' et numero_plan='0004'.\n".
+            "Pour MSA, conserve aussi les subdivisions simples A, B, J, K, AJ, AK, BJ, BK comme lignes distinctes lorsque presentes dans le tableau.\n".
+            "Pour MSA, ne deduplique pas les lignes qui ont le meme SECTION + NUMERO PLAN si elles ont des suffixes de subdivision differents dans le document.\n".
+            "Pour MSA, ne transforme jamais un code culture ou un suffixe en numero_plan. Exemple: 'ZZ 0018 K 02 T' donne section='ZZ', numero_plan='0018', et jamais '0014'.\n".
+            "Pour MSA, le departement doit etre lu depuis la colonne DEPT en debut de ligne ou repris du bloc courant si la ligne continue sur le meme bloc. Ne jamais inventer dept='05' si le document indique dept='72'.\n".
+            "Pour MSA, si une ligne de parcelle ne repete pas DEPT/COM mais suit directement une ligne du meme bloc, reutilise le dernier DEPT/COM valide.\n".
+            "Pour MSA, une ligne comme 'ZS 0003 02 P' est une parcelle valide: section='ZS', numero_plan='0003'.\n".
+            "Pour MSA, lis toutes les lignes jusqu'a la fin du tableau, y compris apres les lignes TOTAL, POTAG ou les ruptures de compte proprietaire.\n".
+            "Pour MSA, une ligne qui commence directement par SECTION + NUMERO PLAN sans repeter DEPT et COM doit etre extraite en reutilisant le dernier DEPT et COM valides.\n".
+            "Exemple: apres une ligne '72 083 S 00027 ZS 0030 J 02 T', une ligne suivante 'ZS 0030 K 03 T' doit produire une deuxieme entree section='ZS', numero_plan='0030'.\n".
+            "Exemple: une ligne 'ZS 0003 02 P' doit etre extraite avec le dernier dept/com valides: dept='72', com='083', section='ZS', numero_plan='0003'.\n".
+            "Ne t'arrete pas au premier total intermediaire: les lignes de parcelles visibles apres un total doivent aussi etre extraites.\n".
             "Pour MSA, lis le couple SECTION + NUMERO PLAN uniquement dans le bloc d identification des parcelles, avant les colonnes CULT CAD, ANT, SUPERFICIE, R.C REEL, Euros et Faire Valoir.\n".
             "Pour MSA, les motifs de droite comme '02 T', '03 T', '02 P', '01 P', 'A 03 T' ou 'B 03 P' appartiennent aux colonnes de culture et ne doivent jamais etre utilises pour section ou numero_plan.\n".
             "Pour MSA, dept contient 2 chiffres, com 3 chiffres, prefixe exactement 3 chiffres ou une chaine vide, section 1 ou 2 caracteres, numero_plan 4 chiffres si lisibles.\n".

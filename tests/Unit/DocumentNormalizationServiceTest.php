@@ -68,7 +68,7 @@ it('removes OCR noise before parsing compact residence permit mrz', function () 
     ]);
 });
 
-it('normalizes MSA parcel rows with carry-forward, padding, section normalization and deduplication', function () {
+it('normalizes MSA parcel rows with carry-forward, padding, section normalization and preserved duplicates', function () {
     $service = new DocumentNormalizationService;
 
     $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
@@ -114,8 +114,17 @@ it('normalizes MSA parcel rows with carry-forward, padding, section normalizatio
                 'section' => 'ZD',
                 'numero_plan' => '0009',
             ],
+            [
+                'dept' => '01',
+                'com' => '023',
+                'prefixe' => '007',
+                'section' => 'ZD',
+                'numero_plan' => '0009',
+            ],
         ],
-    ])->and($result['needs_review'])->toBeFalse();
+    ]);
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
 });
 
 it('normalizes inpi and acte de situation like company extracts', function (string $documentType) {

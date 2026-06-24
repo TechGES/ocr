@@ -317,6 +317,102 @@ class DocumentNormalizationService
     }
 
     /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaOutlierDepartments(array $rows): array
+    {
+        $deptCounts = [];
+
+        foreach ($rows as $row) {
+            $dept = $row['dept'] ?? '';
+
+            if ($dept === '') {
+                continue;
+            }
+
+            $deptCounts[$dept] = ($deptCounts[$dept] ?? 0) + 1;
+        }
+
+        arsort($deptCounts);
+
+        $dominantDeptKey = array_key_first($deptCounts);
+        $dominantDept = $dominantDeptKey !== null ? (string) $dominantDeptKey : null;
+
+        if ($dominantDept === null || ($deptCounts[$dominantDept] ?? 0) < 3) {
+            return $rows;
+        }
+
+        return array_map(function (array $row) use ($deptCounts, $dominantDept): array {
+            $dept = (string) ($row['dept'] ?? '');
+
+            if ($dept === '' || ($dept !== $dominantDept && ($deptCounts[$dept] ?? 0) === 1)) {
+                $row['dept'] = (string) $dominantDept;
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaDepartmentByCommuneContext(array $rows): array
+    {
+        $deptCountsByCom = [];
+
+        foreach ($rows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+
+            if ($dept === '' || $com === '') {
+                continue;
+            }
+
+            $deptCountsByCom[$com][$dept] = ($deptCountsByCom[$com][$dept] ?? 0) + 1;
+        }
+
+        $dominantDeptByCom = [];
+
+        foreach ($deptCountsByCom as $com => $deptCounts) {
+            arsort($deptCounts);
+
+            $dominantDept = array_key_first($deptCounts);
+
+            if ($dominantDept === null) {
+                continue;
+            }
+
+            $dominantDeptByCom[$com] = (string) $dominantDept;
+        }
+
+        return array_map(function (array $row) use ($deptCountsByCom, $dominantDeptByCom): array {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+
+            if ($dept === '' || $com === '') {
+                return $row;
+            }
+
+            $dominantDept = $dominantDeptByCom[$com] ?? null;
+
+            if ($dominantDept === null || $dept === $dominantDept) {
+                return $row;
+            }
+
+            $currentCount = $deptCountsByCom[$com][$dept] ?? 0;
+            $dominantCount = $deptCountsByCom[$com][$dominantDept] ?? 0;
+
+            if ($dominantCount >= 3 && $currentCount < $dominantCount) {
+                $row['dept'] = $dominantDept;
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
@@ -331,56 +427,64 @@ class DocumentNormalizationService
         $lastDept = '';
         $lastCom = '';
         $rows = [];
-        $seen = [];
 
         foreach ($parcelPayloads as $parcelPayload) {
             $rowPayload = is_array($parcelPayload) ? $parcelPayload : [];
 
-            $dept = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['dept', 'departement']), 2);
-            $com = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['com', 'commune']), 3);
-            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
-            $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
-            $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
+            $rawDept = trim($this->firstStringValue($rowPayload, ['dept', 'departement']));
+            $rawCom = trim($this->firstStringValue($rowPayload, ['com', 'commune']));
+
+            $dept = preg_match('/^\d{1,2}$/', $rawDept) === 1
+                ? $this->normalizeFixedDigits($rawDept, 2)
+                : '';
+
+            $com = preg_match('/^\d{1,3}$/', $rawCom) === 1
+                ? $this->normalizeFixedDigits($rawCom, 3)
+                : '';
 
             if ($dept === '') {
                 $dept = $lastDept;
-            } else {
-                $lastDept = $dept;
             }
 
             if ($com === '') {
                 $com = $lastCom;
-            } else {
+            }
+
+            if ($dept !== '') {
+                $lastDept = $dept;
+            }
+
+            if ($com !== '') {
                 $lastCom = $com;
             }
+
+            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
+            $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
+            $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
 
             if ($dept === '' && $com === '' && $prefixe === '' && $section === '' && $numeroPlan === '') {
                 continue;
             }
 
-            $record = [
+            if ($section === '' || preg_match('/[A-Z]/u', $section) !== 1) {
+                continue;
+            }
+
+            if ($numeroPlan === '' || $numeroPlan === '0000') {
+                continue;
+            }
+
+            $rows[] = [
                 'dept' => $dept,
                 'com' => $com,
                 'prefixe' => $prefixe,
                 'section' => $section,
                 'numero_plan' => $numeroPlan,
             ];
-
-            $dedupeKey = implode('.', [
-                $record['dept'],
-                $record['com'],
-                $record['prefixe'],
-                $record['section'],
-                $record['numero_plan'],
-            ]);
-
-            if (isset($seen[$dedupeKey])) {
-                continue;
-            }
-
-            $seen[$dedupeKey] = true;
-            $rows[] = $record;
         }
+
+        $rows = $this->normalizeMsaOutlierDepartments($rows);
+        $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
 
         return [
             'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
@@ -525,12 +629,15 @@ class DocumentNormalizationService
                 $errors[] = sprintf('MSA row %d prefixe must contain exactly 3 digits when present.', $rowNumber);
             }
 
-            if (($row['section'] ?? '') === '' || preg_match('/^[A-Z0-9]{2}$/', (string) $row['section']) !== 1) {
-                $errors[] = sprintf('MSA row %d section must contain exactly 2 normalized characters.', $rowNumber);
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if ($section === '' || preg_match('/^[A-Z0-9]{2}$/', $section) !== 1 || preg_match('/[A-Z]/u', $section) !== 1) {
+                $errors[] = sprintf('MSA row %d section must contain 2 normalized characters with at least one letter.', $rowNumber);
             }
 
-            if (($row['numero_plan'] ?? '') === '' || preg_match('/^\d{4}$/', (string) $row['numero_plan']) !== 1) {
-                $errors[] = sprintf('MSA row %d numero_plan must contain exactly 4 digits.', $rowNumber);
+            if ($numeroPlan === '' || preg_match('/^\d{4}$/', $numeroPlan) !== 1 || $numeroPlan === '0000') {
+                $errors[] = sprintf('MSA row %d numero_plan must contain exactly 4 digits and cannot be 0000.', $rowNumber);
             }
         }
 

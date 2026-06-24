@@ -355,6 +355,64 @@ class DocumentNormalizationService
     }
 
     /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaDepartmentByCommuneContext(array $rows): array
+    {
+        $deptCountsByCom = [];
+
+        foreach ($rows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+
+            if ($dept === '' || $com === '') {
+                continue;
+            }
+
+            $deptCountsByCom[$com][$dept] = ($deptCountsByCom[$com][$dept] ?? 0) + 1;
+        }
+
+        $dominantDeptByCom = [];
+
+        foreach ($deptCountsByCom as $com => $deptCounts) {
+            arsort($deptCounts);
+
+            $dominantDept = array_key_first($deptCounts);
+
+            if ($dominantDept === null) {
+                continue;
+            }
+
+            $dominantDeptByCom[$com] = (string) $dominantDept;
+        }
+
+        return array_map(function (array $row) use ($deptCountsByCom, $dominantDeptByCom): array {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+
+            if ($dept === '' || $com === '') {
+                return $row;
+            }
+
+            $dominantDept = $dominantDeptByCom[$com] ?? null;
+
+            if ($dominantDept === null || $dept === $dominantDept) {
+                return $row;
+            }
+
+            $currentCount = $deptCountsByCom[$com][$dept] ?? 0;
+            $dominantCount = $deptCountsByCom[$com][$dominantDept] ?? 0;
+
+            if ($dominantCount >= 3 && $currentCount < $dominantCount) {
+                $row['dept'] = $dominantDept;
+            }
+
+            return $row;
+        }, $rows);
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
@@ -408,6 +466,14 @@ class DocumentNormalizationService
                 continue;
             }
 
+            if ($section === '' || preg_match('/[A-Z]/u', $section) !== 1) {
+                continue;
+            }
+
+            if ($numeroPlan === '' || $numeroPlan === '0000') {
+                continue;
+            }
+
             $rows[] = [
                 'dept' => $dept,
                 'com' => $com,
@@ -418,6 +484,7 @@ class DocumentNormalizationService
         }
 
         $rows = $this->normalizeMsaOutlierDepartments($rows);
+        $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
 
         return [
             'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
@@ -562,12 +629,15 @@ class DocumentNormalizationService
                 $errors[] = sprintf('MSA row %d prefixe must contain exactly 3 digits when present.', $rowNumber);
             }
 
-            if (($row['section'] ?? '') === '' || preg_match('/^[A-Z0-9]{2}$/', (string) $row['section']) !== 1) {
-                $errors[] = sprintf('MSA row %d section must contain exactly 2 normalized characters.', $rowNumber);
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if ($section === '' || preg_match('/^[A-Z0-9]{2}$/', $section) !== 1 || preg_match('/[A-Z]/u', $section) !== 1) {
+                $errors[] = sprintf('MSA row %d section must contain 2 normalized characters with at least one letter.', $rowNumber);
             }
 
-            if (($row['numero_plan'] ?? '') === '' || preg_match('/^\d{4}$/', (string) $row['numero_plan']) !== 1) {
-                $errors[] = sprintf('MSA row %d numero_plan must contain exactly 4 digits.', $rowNumber);
+            if ($numeroPlan === '' || preg_match('/^\d{4}$/', $numeroPlan) !== 1 || $numeroPlan === '0000') {
+                $errors[] = sprintf('MSA row %d numero_plan must contain exactly 4 digits and cannot be 0000.', $rowNumber);
             }
         }
 

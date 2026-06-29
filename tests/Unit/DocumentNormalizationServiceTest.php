@@ -39,6 +39,63 @@ it('parses compact residence permit mrz and splits multiline address', function 
         ->and($result['needs_review'])->toBeFalse();
 });
 
+it('corrects isolated MSA context outliers surrounded by the same valid context', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => [
+            [
+                'dept' => '72',
+                'com' => '294',
+                'prefixe' => '',
+                'section' => 'ZD',
+                'numero_plan' => '0100',
+            ],
+            [
+                'dept' => '90',
+                'com' => '104',
+                'prefixe' => '',
+                'section' => 'ZH',
+                'numero_plan' => '0055',
+            ],
+            [
+                'dept' => '72',
+                'com' => '294',
+                'prefixe' => '',
+                'section' => 'ZD',
+                'numero_plan' => '0099',
+            ],
+        ],
+    ]);
+
+    expect($result['normalized']['msa_parcels'])->toMatchArray([
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZD',
+            'numero_plan' => '0100',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZD',
+            'numero_plan' => '0099',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
 it('removes OCR noise before parsing compact residence permit mrz', function () {
     $service = new DocumentNormalizationService;
 

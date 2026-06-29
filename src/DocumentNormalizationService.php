@@ -413,6 +413,72 @@ class DocumentNormalizationService
     }
 
     /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaIsolatedContextOutliers(array $rows): array
+    {
+        $contextCounts = [];
+
+        foreach ($rows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+
+            if ($dept === '' || $com === '') {
+                continue;
+            }
+
+            $key = $dept.'|'.$com;
+            $contextCounts[$key] = ($contextCounts[$key] ?? 0) + 1;
+        }
+
+        $count = count($rows);
+
+        for ($index = 1; $index < $count - 1; $index++) {
+            $previous = $rows[$index - 1];
+            $current = $rows[$index];
+            $next = $rows[$index + 1];
+
+            $previousDept = (string) ($previous['dept'] ?? '');
+            $previousCom = (string) ($previous['com'] ?? '');
+            $currentDept = (string) ($current['dept'] ?? '');
+            $currentCom = (string) ($current['com'] ?? '');
+            $nextDept = (string) ($next['dept'] ?? '');
+            $nextCom = (string) ($next['com'] ?? '');
+
+            if (
+                $previousDept === ''
+                || $previousCom === ''
+                || $currentDept === ''
+                || $currentCom === ''
+                || $nextDept === ''
+                || $nextCom === ''
+            ) {
+                continue;
+            }
+
+            if ($previousDept !== $nextDept || $previousCom !== $nextCom) {
+                continue;
+            }
+
+            if ($currentDept === $previousDept && $currentCom === $previousCom) {
+                continue;
+            }
+
+            $currentContextKey = $currentDept.'|'.$currentCom;
+
+            if (($contextCounts[$currentContextKey] ?? 0) !== 1) {
+                continue;
+            }
+
+            $rows[$index]['dept'] = $previousDept;
+            $rows[$index]['com'] = $previousCom;
+        }
+
+        return $rows;
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
@@ -482,6 +548,7 @@ class DocumentNormalizationService
         }
 
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
+        $rows = $this->normalizeMsaIsolatedContextOutliers($rows);
 
         return [
             'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,

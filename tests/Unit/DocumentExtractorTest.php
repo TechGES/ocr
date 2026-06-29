@@ -305,3 +305,145 @@ it('prefers deterministic MSA text parcels over noisy LLM parcels when available
         ],
     ]);
 });
+
+it('keeps MSA lot 1143 reference parcels attached to their visible cadastral context', function () {
+    $schemaFactory = new DocumentSchemaFactory;
+    $ollamaClient = Mockery::mock(OllamaClient::class);
+
+    $ollamaClient->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '72',
+                    'com' => '294',
+                    'prefixe' => '',
+                    'section' => 'ZE',
+                    'numero_plan' => '0097',
+                ],
+                [
+                    'dept' => '90',
+                    'com' => '104',
+                    'prefixe' => '',
+                    'section' => 'ZH',
+                    'numero_plan' => '0055',
+                ],
+            ],
+        ]);
+
+    $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
+
+    $result = $extractor->extractFromText(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        implode("\n", [
+            '61 279 B 00140 ZE 0018 03 P',
+            'ZE 0014 AJ 02 P',
+            'ZE 0097 02 T',
+            'ZE 0099 AJ 02 P',
+            'ZE 0049 03 P',
+            'ZE 0103 03 P',
+            'ZE 0105 03 P',
+            'ZE 0107 J 02 P',
+            '72 294 B 00269 ZD 0029 02 P',
+            'ZH 0055 03 P',
+            'ZD 0099 A 03 P',
+        ])
+    );
+
+    expect($result['msa_parcels'])->toBe([
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0018',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0014',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0097',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0099',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0049',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0103',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0105',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0107',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZD',
+            'numero_plan' => '0029',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZD',
+            'numero_plan' => '0099',
+        ],
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '294',
+        'prefixe' => '',
+        'section' => 'ZE',
+        'numero_plan' => '0097',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '90',
+        'com' => '104',
+        'prefixe' => '',
+        'section' => 'ZH',
+        'numero_plan' => '0055',
+    ]);
+});

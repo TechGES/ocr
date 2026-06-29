@@ -442,20 +442,13 @@ class DocumentNormalizationService
                 ? $this->normalizeFixedDigits($rawCom, 3)
                 : '';
 
-            if ($dept === '') {
+            if ($dept === '' && $com === '') {
                 $dept = $lastDept;
-            }
-
-            if ($com === '') {
                 $com = $lastCom;
-            }
-
-            if ($dept !== '') {
-                $lastDept = $dept;
-            }
-
-            if ($com !== '') {
-                $lastCom = $com;
+            } elseif ($dept === '' && $com !== '' && $lastDept !== '') {
+                $dept = $lastDept;
+            } elseif ($dept !== '' && $com === '' && $lastCom !== '') {
+                $com = $lastCom;
             }
 
             $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
@@ -481,9 +474,13 @@ class DocumentNormalizationService
                 'section' => $section,
                 'numero_plan' => $numeroPlan,
             ];
+
+            if ($dept !== '' && $com !== '') {
+                $lastDept = $dept;
+                $lastCom = $com;
+            }
         }
 
-        $rows = $this->normalizeMsaOutlierDepartments($rows);
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
 
         return [

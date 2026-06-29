@@ -165,3 +165,74 @@ it('normalizes inpi and acte de situation like company extracts', function (stri
     'inpi' => DocumentProcessing::BUSINESS_TYPE_INPI,
     'acte_de_situation' => DocumentProcessing::BUSINESS_TYPE_ACTE_DE_SITUATION,
 ]);
+
+it('keeps rare but valid MSA departments when another department is dominant', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => [
+            [
+                'dept' => '61',
+                'com' => '165',
+                'prefixe' => '',
+                'section' => 'ZC',
+                'numero_plan' => '0031',
+            ],
+            [
+                'dept' => '72',
+                'com' => '141',
+                'prefixe' => '',
+                'section' => 'ZO',
+                'numero_plan' => '0087',
+            ],
+            [
+                'dept' => '72',
+                'com' => '141',
+                'prefixe' => '',
+                'section' => 'ZO',
+                'numero_plan' => '0041',
+            ],
+            [
+                'dept' => '72',
+                'com' => '294',
+                'prefixe' => '',
+                'section' => 'ZH',
+                'numero_plan' => '0055',
+            ],
+        ],
+    ]);
+
+    expect($result['normalized']['msa_parcels'])->toMatchArray([
+        [
+            'dept' => '61',
+            'com' => '165',
+            'prefixe' => '',
+            'section' => 'ZC',
+            'numero_plan' => '0031',
+        ],
+        [
+            'dept' => '72',
+            'com' => '141',
+            'prefixe' => '',
+            'section' => 'ZO',
+            'numero_plan' => '0087',
+        ],
+        [
+            'dept' => '72',
+            'com' => '141',
+            'prefixe' => '',
+            'section' => 'ZO',
+            'numero_plan' => '0041',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});

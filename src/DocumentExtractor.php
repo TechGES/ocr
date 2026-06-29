@@ -44,6 +44,10 @@ class DocumentExtractor
      */
     private function mergeMsaParcels(array $llmParcels, array $textParcels): array
     {
+        if ($textParcels !== []) {
+            return array_values($textParcels);
+        }
+
         $merged = [];
         $mergedCounts = [];
 

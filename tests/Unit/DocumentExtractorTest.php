@@ -268,3 +268,40 @@ it('enforces the MSA parcel-table extraction contract', function () {
 
     expect($result['document_type'])->toBe(DocumentProcessing::BUSINESS_TYPE_MSA);
 });
+
+it('prefers deterministic MSA text parcels over noisy LLM parcels when available', function () {
+    $schemaFactory = new DocumentSchemaFactory;
+    $ollamaClient = Mockery::mock(OllamaClient::class);
+
+    $ollamaClient->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '90',
+                    'com' => '104',
+                    'prefixe' => '',
+                    'section' => 'ZH',
+                    'numero_plan' => '0055',
+                ],
+            ],
+        ]);
+
+    $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
+
+    $result = $extractor->extractFromText(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        "72 294 B 00269 ZH 0055 03 P\n"
+    );
+
+    expect($result['msa_parcels'])->toBe([
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+    ]);
+});

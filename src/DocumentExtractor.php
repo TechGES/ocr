@@ -44,6 +44,10 @@ class DocumentExtractor
      */
     private function mergeMsaParcels(array $llmParcels, array $textParcels): array
     {
+        if ($textParcels !== []) {
+            return array_values($textParcels);
+        }
+
         $merged = [];
         $mergedCounts = [];
 
@@ -103,7 +107,12 @@ class DocumentExtractor
                 'Û' => 'U',
                 'Ù' => 'U',
                 'Ç' => 'C',
+                'Ê' => 'E',
+                '0O' => '00',
+                'O0' => '00',
+                'OO' => '00',
             ]);
+
             $line = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $line) ?? $line;
             $line = preg_replace('/\s+/u', ' ', trim($line)) ?? trim($line);
 
@@ -111,29 +120,43 @@ class DocumentExtractor
                 continue;
             }
 
-            if (preg_match('/\b(\d{2})\s+(\d{3})\b/u', $line, $matches) === 1) {
+            if (preg_match('/^\d{2}$/u', $line) === 1) {
+                $lastDept = str_pad($line, 2, '0', STR_PAD_LEFT);
+
+                continue;
+            }
+
+            if (preg_match('/^(\d{2})\s+(\d{3})\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
             preg_match_all(
-                '/\b([A-Z]{1,2})\s*(\d{4})\s+(?:(?:[A-Z]{1,2})\s*)?\d{2}\s*[A-Z]\b/u',
+                '/(?<![A-Z0-9])([Z2][A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
                 $line,
                 $matches,
                 PREG_SET_ORDER
             );
 
-            foreach ($matches as $match) {
-                $section = mb_strtoupper($match[1]);
-                $numeroPlan = $match[2];
+            if ($this->hasContradictoryMsaTextCandidates($matches)) {
+                continue;
+            }
 
-                if (in_array($section, ['DU', 'OU', 'LE', 'LA', 'DE', 'OE', 'RC'], true)) {
+            foreach ($matches as $match) {
+                $section = $this->normalizeMsaTextSection($match[1]);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
+
+                if ($section === '' || $numeroPlan === '') {
                     continue;
                 }
 
                 if ($numeroPlan === '0000') {
+                    continue;
+                }
+
+                if ($this->looksLikeMsaOwnerAccount($line, $section, $numeroPlan)) {
                     continue;
                 }
 
@@ -148,6 +171,85 @@ class DocumentExtractor
         }
 
         return $parcels;
+    }
+
+    /**
+     * @param array<int, array<int, string>> $matches
+     */
+    private function hasContradictoryMsaTextCandidates(array $matches): bool
+    {
+        $normalizedCandidates = [];
+
+        foreach ($matches as $match) {
+            $section = $this->normalizeMsaTextSection($match[1] ?? '');
+            $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2] ?? '');
+
+            if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
+                continue;
+            }
+
+            $normalizedCandidates[] = $section.'|'.$numeroPlan;
+        }
+
+        return count(array_unique($normalizedCandidates)) > 1;
+    }
+
+    private function normalizeMsaTextSection(string $value): string
+    {
+        $section = mb_strtoupper(trim($value));
+        $section = strtr($section, [
+            '0' => 'O',
+            '1' => 'I',
+            '2' => 'Z',
+        ]);
+        $section = preg_replace('/[^A-Z]/u', '', $section) ?? '';
+
+        if ($section === '') {
+            return '';
+        }
+
+        if (in_array($section, ['DU', 'OU', 'LE', 'LA', 'DE', 'OE', 'RC'], true)) {
+            return '';
+        }
+
+        if (strlen($section) === 1) {
+            return '0'.$section;
+        }
+
+        return substr($section, 0, 2);
+    }
+
+    private function normalizeMsaTextNumeroPlan(string $value): string
+    {
+        $digits = strtr(mb_strtoupper(trim($value)), [
+            'O' => '0',
+            'A' => '0',
+        ]);
+
+        $digits = preg_replace('/\D+/u', '', $digits) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        if (strlen($digits) > 4) {
+            $digits = substr($digits, -4);
+        }
+
+        if (strlen($digits) === 4 && str_starts_with($digits, '4')) {
+            $digits = '0'.substr($digits, 1);
+        }
+
+        return str_pad($digits, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function looksLikeMsaOwnerAccount(string $line, string $section, string $numeroPlan): bool
+    {
+        if (strlen($section) !== 2 || $section[0] === 'Z') {
+            return false;
+        }
+
+        return preg_match('/\b\d{3}\s+'.$section.'\s+'.$numeroPlan.'\b/u', $line) === 1;
     }
 
     /**

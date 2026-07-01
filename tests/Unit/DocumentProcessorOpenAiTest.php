@@ -41,6 +41,7 @@ it('uses the one-shot openai analyzer for image inputs', function () {
     $openAiDocumentAnalyzer = Mockery::mock(OpenAiDocumentAnalyzer::class);
     $openAiDocumentAnalyzer->shouldReceive('analyzeImages')
         ->once()
+        ->with(Mockery::type('array'))
         ->andReturn([
             'classification' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_CIN,
@@ -97,7 +98,14 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
         ->andReturn([
             'input_type' => DocumentProcessingValues::INPUT_TYPE_PDF_TEXT,
             'pages_count' => 14,
-            'extracted_text' => "RELEVE D'EXPLOITATION\nIDENTIFICATION DES PARCELLES\nNUMERO PLAN\nMSA",
+            'extracted_text' => implode("\n", [
+                "MSA MAYENNE ORNE SARTHE",
+                "RELEVE D'EXPLOITATION",
+                "IDENTIFICATION DES PARCELLES",
+                "DESIGNATION CADASTRALE",
+                "NUMERO PLAN",
+                "85 006 B 0357 ZA 0025",
+            ]),
         ]);
 
     $pdfToImageConverter = Mockery::mock(PdfToImageConverter::class);
@@ -116,8 +124,9 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
     $documentExtractor->shouldNotReceive('extractFromText');
 
     $openAiDocumentAnalyzer = Mockery::mock(OpenAiDocumentAnalyzer::class);
-    $openAiDocumentAnalyzer->shouldReceive('analyzeImages')
+    $openAiDocumentAnalyzer->shouldReceive('analyzeMsaImagesPageByPage')
         ->once()
+        ->with(Mockery::type('array'))
         ->andReturn([
             'classification' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
@@ -131,12 +140,14 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
                         'dept' => '85',
                         'com' => '006',
                         'prefixe' => '',
-                        'section' => 'B',
-                        'numero_plan' => '0357',
+                        'section' => 'ZA',
+                        'numero_plan' => '0025',
                     ],
                 ],
             ],
         ]);
+
+    $openAiDocumentAnalyzer->shouldNotReceive('analyzeImages');
     $openAiDocumentAnalyzer->shouldNotReceive('analyzeText');
 
     $normalizationService = app(DocumentNormalizationService::class);
@@ -158,6 +169,7 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
     $result = $processor->processFile($path, 'application/pdf', 'MSA.pdf');
 
     expect($result->documentType)->toBe(DocumentProcessingValues::BUSINESS_TYPE_MSA)
-        ->and($result->rawExtractionJson['msa_parcels'][0]['section'])->toBe('B')
-        ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('0B');
+        ->and($result->rawExtractionJson['msa_parcels'][0]['section'])->toBe('ZA')
+        ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('ZA')
+        ->and($result->normalizedJson['msa_parcels'][0]['numero_plan'])->toBe('0025');
 });

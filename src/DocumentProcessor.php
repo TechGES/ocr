@@ -61,7 +61,8 @@ class DocumentProcessor
                 $pageImages = $this->pdfToImageConverter->convert($source->path, $temporaryImageDirectory, $maxPages);
                 $pageCount = count($pageImages);
 
-                $analysis = $this->openAiDocumentAnalyzer->analyzeImages($pageImages);
+                $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage($pageImages);
+
                 $classification = $analysis['classification'];
                 $extraction = $analysis['extraction'];
 
@@ -327,13 +328,53 @@ class DocumentProcessor
 
     protected function looksLikeMsaParcelTable(string $text): bool
     {
-        $normalized = mb_strtolower($text);
-        $normalized = str_replace(["'", '’'], ' ', $normalized);
+        $normalized = mb_strtoupper($text);
+        $normalized = strtr($normalized, [
+            'À' => 'A',
+            'Â' => 'A',
+            'Ä' => 'A',
+            'Ç' => 'C',
+            'É' => 'E',
+            'È' => 'E',
+            'Ê' => 'E',
+            'Ë' => 'E',
+            'Î' => 'I',
+            'Ï' => 'I',
+            'Ô' => 'O',
+            'Ö' => 'O',
+            'Ù' => 'U',
+            'Û' => 'U',
+            'Ü' => 'U',
+            '’' => "'",
+        ]);
 
-        return str_contains($normalized, 'releve d exploitation')
-            && str_contains($normalized, 'identification des parcelles')
-            && str_contains($normalized, 'numero plan')
-            && str_contains($normalized, 'msa');
+        $normalized = preg_replace('/[^A-Z0-9]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = trim(preg_replace('/\s+/u', ' ', $normalized) ?? $normalized);
+
+        $hasMsaMarker = str_contains($normalized, 'MSA')
+            || str_contains($normalized, 'MAYENNE ORNE SARTHE');
+
+        $hasExploitationMarker = str_contains($normalized, 'RELEVE D EXPLOITATION')
+            || (
+                str_contains($normalized, 'RELEVE')
+                && str_contains($normalized, 'EXPLOITATION')
+            );
+
+        $hasParcelMarker = str_contains($normalized, 'PARCELLES')
+            || str_contains($normalized, 'CADASTRALE')
+            || str_contains($normalized, 'DESIGNATION CADASTRALE');
+
+        $hasPlanMarker = str_contains($normalized, 'NUMERO PLAN')
+            || str_contains($normalized, 'PLAN');
+
+        $hasCadastralRows = preg_match('/\b\d{2}\s+\d{3}\s+[A-Z]\s+\d{4}\s+Z[A-Z0-9]\s+\d{4}\b/u', $normalized) === 1
+            || preg_match('/\bZ[A-Z0-9]\s+\d{4}\b/u', $normalized) === 1;
+
+        return $hasMsaMarker
+            && $hasExploitationMarker
+            && $hasParcelMarker
+            && $hasPlanMarker
+            && $hasCadastralRows;
     }
 
     protected function configuredMaxPages(): int

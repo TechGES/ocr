@@ -268,3 +268,235 @@ it('enforces the MSA parcel-table extraction contract', function () {
 
     expect($result['document_type'])->toBe(DocumentProcessing::BUSINESS_TYPE_MSA);
 });
+
+it('prefers deterministic MSA text parcels over noisy LLM parcels when available', function () {
+    $schemaFactory = new DocumentSchemaFactory;
+    $ollamaClient = Mockery::mock(OllamaClient::class);
+
+    $ollamaClient->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '90',
+                    'com' => '104',
+                    'prefixe' => '',
+                    'section' => 'ZH',
+                    'numero_plan' => '0055',
+                ],
+            ],
+        ]);
+
+    $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
+
+    $result = $extractor->extractFromText(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        "72 294 B 00269 ZH 0055 03 P\n"
+    );
+
+    expect($result['msa_parcels'])->toBe([
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+    ]);
+});
+
+it('keeps MSA lot 1143 reference parcels attached to their visible cadastral context', function () {
+    $schemaFactory = new DocumentSchemaFactory;
+    $ollamaClient = Mockery::mock(OllamaClient::class);
+
+    $ollamaClient->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '72',
+                    'com' => '294',
+                    'prefixe' => '',
+                    'section' => 'ZE',
+                    'numero_plan' => '0097',
+                ],
+                [
+                    'dept' => '90',
+                    'com' => '104',
+                    'prefixe' => '',
+                    'section' => 'ZH',
+                    'numero_plan' => '0055',
+                ],
+            ],
+        ]);
+
+    $extractor = new DocumentExtractor($ollamaClient, $schemaFactory);
+
+    $result = $extractor->extractFromText(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        implode("\n", [
+            '61',
+            '165 D 00033 ZC 0031 û27',
+            '61',
+            '279 B 00140',
+            'zE 0018 03P',
+            'zE 0014 AJ 02 P',
+            '2Ê. A014 AK03 P',
+            'ZE OO14 B 03 T',
+            'zE 0097 02 T',
+            'zE 0099 AJ 02 P',
+            'zÉ 0099 AK03 P',
+            'zE 0099 B 03 T',
+            'zÉ. oa22 02 P',
+            'ZE D0/B KO3 P',
+            'zE 0049 03 P',
+            'zE 0103 03 P',
+            'zE 0105 03 P',
+            'zË. 4107 J 02 P',
+            'zÉ. 0107 K 03 P',
+            '279 F 00045 zE 0019 03P',
+            '61',
+            '279 R 00034 zD 0010 J 01 P',
+            'zD 0010 K 02 P',
+            'zD 0010 L 03 P',
+            'zo 0009 AJ 01 T',
+            'zo 0009 AK02 T',
+            'zD 0009 B 03 T',
+            '279 R 00051 Zt 0042 03P',
+            '72',
+            '294 B 00269 0 zD 0029 02 P',
+            'zD 0081 AJ 02 P',
+            'zD 0100 03 P',
+            'zH 0055 03 P',
+            'zD 0099 A 03 P',
+            'zD 0033 J 02 P',
+        ])
+    );
+
+    expect($result['msa_parcels'])->toContain(
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0097',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0049',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0103',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0105',
+        ],
+        [
+            'dept' => '61',
+            'com' => '279',
+            'prefixe' => '',
+            'section' => 'ZE',
+            'numero_plan' => '0107',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+    );
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '294',
+        'prefixe' => '',
+        'section' => 'ZE',
+        'numero_plan' => '0097',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '294',
+        'prefixe' => '',
+        'section' => 'ZE',
+        'numero_plan' => '0049',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '90',
+        'com' => '104',
+        'prefixe' => '',
+        'section' => 'ZH',
+        'numero_plan' => '0055',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '61',
+        'com' => '372',
+        'prefixe' => '',
+        'section' => 'ZO',
+        'numero_plan' => '0087',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '61',
+        'com' => '372',
+        'prefixe' => '',
+        'section' => 'ZO',
+        'numero_plan' => '0090',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '141',
+        'prefixe' => '',
+        'section' => 'ZO',
+        'numero_plan' => '0070',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '141',
+        'prefixe' => '',
+        'section' => 'ZA',
+        'numero_plan' => '0042',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '212',
+        'prefixe' => '',
+        'section' => 'ZH',
+        'numero_plan' => '0040',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '212',
+        'prefixe' => '',
+        'section' => 'ZL',
+        'numero_plan' => '0008',
+    ]);
+
+    expect($result['msa_parcels'])->not->toContain([
+        'dept' => '72',
+        'com' => '212',
+        'prefixe' => '',
+        'section' => 'ZL',
+        'numero_plan' => '0009',
+    ]);
+});

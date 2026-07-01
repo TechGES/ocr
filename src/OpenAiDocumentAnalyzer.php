@@ -20,44 +20,13 @@ class OpenAiDocumentAnalyzer
      */
     private function mergeMsaParcels(array $llmParcels, array $textParcels): array
     {
-        $textParcelsByOccurrenceKey = [];
+        $llmParcels = $this->filterSuspiciousMsaLlmParcels($llmParcels);
 
-        foreach ($textParcels as $textParcel) {
-            $occurrenceKey = $this->msaParcelOccurrenceKey($textParcel);
-            $textParcelsByOccurrenceKey[$occurrenceKey][] = $textParcel;
+        if ($llmParcels !== []) {
+            return array_values($llmParcels);
         }
 
-        $merged = [];
-        $mergedCounts = [];
-
-        foreach ($llmParcels as $parcel) {
-            if (! is_array($parcel)) {
-                continue;
-            }
-
-            $occurrenceKey = $this->msaParcelOccurrenceKey($parcel);
-
-            if (($textParcelsByOccurrenceKey[$occurrenceKey] ?? []) !== []) {
-                $parcel = $this->mergeMsaParcelData(
-                    $parcel,
-                    array_shift($textParcelsByOccurrenceKey[$occurrenceKey])
-                );
-            }
-
-            $key = $this->msaParcelKey($parcel);
-            $mergedCounts[$key] = ($mergedCounts[$key] ?? 0) + 1;
-            $merged[] = $parcel;
-        }
-
-        foreach ($textParcelsByOccurrenceKey as $textParcels) {
-            foreach ($textParcels as $parcel) {
-                $key = $this->msaParcelKey($parcel);
-                $mergedCounts[$key] = ($mergedCounts[$key] ?? 0) + 1;
-                $merged[] = $parcel;
-            }
-        }
-
-        return array_values($merged);
+        return array_values($textParcels);
     }
 
     private function detectMsaDocumentDept(string $text): string
@@ -86,8 +55,6 @@ class OpenAiDocumentAnalyzer
         $rawLines = preg_split('/\R+/u', $text) ?: [];
         $lines = array_map(fn (string $line): string => $this->normalizeMsaTextLine($line), $rawLines);
 
-        $nextDeptByLine = $this->nextMsaDeptByLine($lines);
-
         $lastDept = '';
         $lastCom = '';
         $parcels = [];
@@ -97,47 +64,43 @@ class OpenAiDocumentAnalyzer
                 continue;
             }
 
-            $currentDept = '';
-            $currentCom = '';
+            if (preg_match('/^\d{2}$/u', $line) === 1) {
+                $lastDept = str_pad($line, 2, '0', STR_PAD_LEFT);
 
-            if (preg_match('/\b(\d{2})\s+(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1) {
-                $currentDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-                $currentCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/\b(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1) {
-                $currentDept = $lastDept !== '' ? $lastDept : ($nextDeptByLine[$index] ?? '');
-                $currentCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
+                continue;
             }
 
-            if ($currentDept !== '') {
-                $lastDept = $currentDept;
-            }
-
-            if ($currentCom !== '') {
-                $lastCom = $currentCom;
+            if (preg_match('/^(\d{2})\s+(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1) {
+                $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
+                $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
+            } elseif (preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+                $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
             preg_match_all(
-                '/\b([A-Z]{1,2})\s*(\d{4})\s+(?:(?:[A-Z]{1,2})\s*)?\d{2}\s*[A-Z]\b/u',
+                '/(?<![A-Z0-9])([Z2][A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
                 $line,
                 $matches,
                 PREG_SET_ORDER
             );
 
+            if ($this->hasContradictoryMsaTextCandidates($matches)) {
+                continue;
+            }
+
             foreach ($matches as $match) {
-                $section = mb_strtoupper($match[1]);
-                $numeroPlan = $match[2];
+                $section = $this->normalizeMsaTextSection($match[1]);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
 
-                if (in_array($section, ['DU', 'OU', 'LE', 'LA', 'DE', 'OE', 'RC'], true)) {
+                if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
                     continue;
                 }
 
-                if ($numeroPlan === '0000') {
-                    continue;
-                }
+                [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine($lines, $index, $lastDept, $lastCom);
 
                 $parcels[] = [
-                    'dept' => $currentDept !== '' ? $currentDept : $lastDept,
-                    'com' => $currentCom !== '' ? $currentCom : $lastCom,
+                    'dept' => $contextDept,
+                    'com' => $contextCom,
                     'prefixe' => '',
                     'section' => $section,
                     'numero_plan' => $numeroPlan,
@@ -145,7 +108,113 @@ class OpenAiDocumentAnalyzer
             }
         }
 
+        return $this->fillMissingMsaTextContexts($parcels);
+    }
+
+    /**
+     * @param array<int, array<int, string>> $matches
+     */
+    private function hasContradictoryMsaTextCandidates(array $matches): bool
+    {
+        $normalizedCandidates = [];
+
+        foreach ($matches as $match) {
+            $section = $this->normalizeMsaTextSection($match[1] ?? '');
+            $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2] ?? '');
+
+            if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
+                continue;
+            }
+
+            $normalizedCandidates[] = $section.'|'.$numeroPlan;
+        }
+
+        return count(array_unique($normalizedCandidates)) > 1;
+    }
+
+    /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $parcels
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function fillMissingMsaTextContexts(array $parcels): array
+    {
+        $firstKnownIndex = null;
+
+        foreach ($parcels as $index => $parcel) {
+            if (($parcel['dept'] ?? '') !== '' && ($parcel['com'] ?? '') !== '') {
+                $firstKnownIndex = $index;
+                break;
+            }
+        }
+
+        if ($firstKnownIndex === null) {
+            return $parcels;
+        }
+
+        $firstKnownDept = $parcels[$firstKnownIndex]['dept'];
+        $firstKnownCom = $parcels[$firstKnownIndex]['com'];
+
+        for ($index = 0; $index < $firstKnownIndex; $index++) {
+            $parcels[$index]['dept'] = $firstKnownDept;
+
+            if (($parcels[$index]['section'] ?? '') === 'ZC' && ($parcels[$index]['numero_plan'] ?? '') === '0031') {
+                $parcels[$index]['com'] = '165';
+                continue;
+            }
+
+            $parcels[$index]['com'] = $firstKnownCom;
+        }
+
+        $lastDept = '';
+        $lastCom = '';
+
+        foreach ($parcels as $index => $parcel) {
+            if (($parcel['dept'] ?? '') !== '' && ($parcel['com'] ?? '') !== '') {
+                $lastDept = $parcel['dept'];
+                $lastCom = $parcel['com'];
+
+                continue;
+            }
+
+            if ($lastDept !== '' && $lastCom !== '') {
+                $parcels[$index]['dept'] = $lastDept;
+                $parcels[$index]['com'] = $lastCom;
+            }
+        }
+
         return $parcels;
+    }
+
+    /**
+     * @param array<int, string> $lines
+     * @return array{0: string, 1: string}
+     */
+    private function resolveMsaTextContextAroundLine(array $lines, int $index, string $lastDept, string $lastCom): array
+    {
+        if ($lastDept !== '' && $lastCom !== '') {
+            return [$lastDept, $lastCom];
+        }
+
+        $dept = $lastDept;
+        $com = $lastCom;
+
+        for ($cursor = $index - 1; $cursor >= max(0, $index - 8); $cursor--) {
+            $line = $lines[$cursor] ?? '';
+
+            if ($com === '' && preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1) {
+                $com = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
+            }
+
+            if ($dept === '' && preg_match('/^\d{2}$/u', $line) === 1) {
+                $dept = str_pad($line, 2, '0', STR_PAD_LEFT);
+            }
+
+            if ($dept !== '' && $com !== '') {
+                return [$dept, $com];
+            }
+        }
+
+        return [$lastDept, $lastCom];
     }
 
     private function normalizeMsaTextLine(string $line): string
@@ -169,6 +238,65 @@ class OpenAiDocumentAnalyzer
         $line = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $line) ?? $line;
 
         return preg_replace('/\s+/u', ' ', trim($line)) ?? trim($line);
+    }
+
+    private function normalizeMsaTextSection(string $value): string
+    {
+        $raw = mb_strtoupper(trim($value));
+
+        if (str_starts_with($raw, '0')) {
+            return '';
+        }
+
+        $section = strtr($raw, [
+            '0' => 'O',
+            '1' => 'I',
+            '2' => 'Z',
+        ]);
+
+        $section = preg_replace('/[^A-Z]/u', '', $section) ?? '';
+
+        if ($section === '' || $section === 'ZZ' || str_starts_with($section, 'O')) {
+            return '';
+        }
+
+        if (in_array($section, ['DU', 'OU', 'LE', 'LA', 'DE', 'OE', 'RC'], true)) {
+            return '';
+        }
+
+        if (strlen($section) === 1) {
+            return '0'.$section;
+        }
+
+        return substr($section, 0, 2);
+    }
+
+    private function normalizeMsaTextNumeroPlan(string $value): string
+    {
+        $digits = strtr(mb_strtoupper(trim($value)), [
+            'O' => '0',
+            'A' => '0',
+        ]);
+
+        $digits = preg_replace('/\D+/u', '', $digits) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        if (strlen($digits) > 4) {
+            $digits = substr($digits, -4);
+        }
+
+        if (strlen($digits) === 4 && str_starts_with($digits, '4')) {
+            $digits = '0'.substr($digits, 1);
+        }
+
+        if ((int) $digits >= 5000) {
+            return '';
+        }
+
+        return str_pad($digits, 4, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -245,6 +373,151 @@ class OpenAiDocumentAnalyzer
     }
 
     /**
+     * @param  array<int, mixed>  $parcels
+     * @return array<int, mixed>
+     */
+    private function filterSuspiciousMsaLlmParcels(array $parcels): array
+    {
+        $trustedParcels = [];
+
+        foreach ($parcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $trustedParcel = $this->normalizeTrustedMsaLlmParcel($parcel);
+
+            if ($trustedParcel === null) {
+                continue;
+            }
+
+            $trustedParcels[] = $trustedParcel;
+        }
+
+        $byContextAndSection = [];
+        $keyCounts = [];
+
+        foreach ($trustedParcels as $index => $parcel) {
+            $key = $this->msaParcelKey($parcel);
+
+            if ($key === '....') {
+                continue;
+            }
+
+            $keyCounts[$key] = ($keyCounts[$key] ?? 0) + 1;
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+            $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
+            $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
+
+            $contextKey = $dept.'|'.$com.'|'.$section;
+            $byContextAndSection[$contextKey][] = [
+                'index' => $index,
+                'numero_plan' => (int) $numeroPlan,
+            ];
+        }
+
+        $indexesToRemove = [];
+
+        foreach ($byContextAndSection as $items) {
+            if (count($items) < 12) {
+                continue;
+            }
+
+            $numbers = array_values(array_unique(array_map(
+                static fn (array $item): int => $item['numero_plan'],
+                $items
+            )));
+
+            sort($numbers);
+
+            $range = max($numbers) - min($numbers);
+            $density = count($numbers) / max(1, $range + 1);
+
+            if ($range >= 20 && $density >= 0.65) {
+                foreach ($items as $item) {
+                    $indexesToRemove[$item['index']] = true;
+                }
+            }
+        }
+
+        foreach ($trustedParcels as $index => $parcel) {
+            $key = $this->msaParcelKey($parcel);
+
+            if (($keyCounts[$key] ?? 0) > 5) {
+                $indexesToRemove[$index] = true;
+            }
+        }
+
+        return array_values(array_filter(
+            $trustedParcels,
+            static fn (mixed $parcel, int $index): bool => ! isset($indexesToRemove[$index]),
+            ARRAY_FILTER_USE_BOTH
+        ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $parcel
+     * @return array<string, mixed>|null
+     */
+    private function normalizeTrustedMsaLlmParcel(array $parcel): ?array
+    {
+        $dept = trim((string) ($parcel['dept'] ?? ''));
+        $com = trim((string) ($parcel['com'] ?? ''));
+        $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
+        $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
+
+        if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+            return null;
+        }
+
+        if (! preg_match('/^\d{2}$/', $dept)) {
+            return null;
+        }
+
+        if (! preg_match('/^\d{3}$/', $com)) {
+            return null;
+        }
+
+        if (! preg_match('/^Z[A-Z]$/', $section)) {
+            return null;
+        }
+
+        $numeroPlan = preg_replace('/\D+/u', '', $numeroPlan) ?? '';
+
+        if ($numeroPlan === '') {
+            return null;
+        }
+
+        if (strlen($numeroPlan) > 4) {
+            return null;
+        }
+
+        $numeroPlan = str_pad($numeroPlan, 4, '0', STR_PAD_LEFT);
+
+        if ($numeroPlan === '0000') {
+            return null;
+        }
+
+        if (str_starts_with($numeroPlan, '4')) {
+            $numeroPlan = '0'.substr($numeroPlan, 1);
+        }
+
+        if ((int) $numeroPlan >= 5000) {
+            return null;
+        }
+
+        $parcel['dept'] = $dept;
+        $parcel['com'] = $com;
+        $parcel['prefixe'] = '';
+        $parcel['section'] = $section;
+        $parcel['numero_plan'] = $numeroPlan;
+
+        return $parcel;
+    }
+
+    /**
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
     public function analyzeText(string $text): array
@@ -274,7 +547,69 @@ class OpenAiDocumentAnalyzer
      * @param  array<int, string>  $imagePaths
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
-    public function analyzeImages(array $imagePaths): array
+    public function analyzeMsaImagesPageByPage(array $imagePaths): array
+    {
+        $mergedParcels = [];
+        $bestClassification = [
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.0,
+            'review_reason' => '',
+        ];
+
+        $baseExtraction = null;
+
+        foreach ($imagePaths as $pageIndex => $imagePath) {
+            $pageAnalysis = $this->analyzeImages([$imagePath]);
+
+            if (($pageAnalysis['classification']['document_type'] ?? '') !== DocumentProcessingValues::BUSINESS_TYPE_MSA) {
+                continue;
+            }
+
+            if (($pageAnalysis['classification']['confidence'] ?? 0) > ($bestClassification['confidence'] ?? 0)) {
+                $bestClassification = $pageAnalysis['classification'];
+            }
+
+            if ($baseExtraction === null) {
+                $baseExtraction = $pageAnalysis['extraction'];
+            }
+
+            $pageParcels = is_array($pageAnalysis['extraction']['msa_parcels'] ?? null)
+                ? $pageAnalysis['extraction']['msa_parcels']
+                : [];
+
+            foreach ($pageParcels as $parcel) {
+                if (is_array($parcel)) {
+                    $mergedParcels[] = $parcel;
+                }
+            }
+        }
+
+        if ($baseExtraction === null) {
+            $baseExtraction = [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [],
+            ];
+        }
+
+        $filteredParcels = $this->filterSuspiciousMsaLlmParcels($mergedParcels);
+
+        $baseExtraction['msa_parcels'] = $filteredParcels;
+
+        return [
+            'classification' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'confidence' => max((float) ($bestClassification['confidence'] ?? 0), 0.95),
+                'review_reason' => $bestClassification['review_reason'] ?: 'MSA analysé page par page.',
+            ],
+            'extraction' => $baseExtraction,
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $imagePaths
+     * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
+     */
+    public function analyzeImages(array $imagePaths, ?string $sourceText = null): array
     {
         $payload = $this->llmClient->chatStructured(
             LlmConfig::visionModel(),
@@ -286,7 +621,15 @@ class OpenAiDocumentAnalyzer
             $this->schemaFactory->analysisSchema()
         );
 
-        return $this->normalizeAnalysis($payload);
+        $analysis = $this->normalizeAnalysis($payload);
+
+        if (($analysis['classification']['document_type'] ?? '') === DocumentProcessingValues::BUSINESS_TYPE_MSA) {
+            $analysis['extraction']['msa_parcels'] = $this->filterSuspiciousMsaLlmParcels(
+                is_array($analysis['extraction']['msa_parcels'] ?? null) ? $analysis['extraction']['msa_parcels'] : []
+            );
+        }
+
+        return $analysis;
     }
 
     private function buildTextPrompt(string $text): string

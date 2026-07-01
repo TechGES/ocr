@@ -993,6 +993,10 @@ class DocumentNormalizationService
             return '0'.$normalized;
         }
 
+        if ($normalized === '0Z') {
+            return '';
+        }
+
         return substr($normalized, 0, 2);
     }
 

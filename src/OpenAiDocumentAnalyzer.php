@@ -394,7 +394,6 @@ class OpenAiDocumentAnalyzer
             $trustedParcels[] = $trustedParcel;
         }
 
-        $byContextAndSection = [];
         $keyCounts = [];
 
         foreach ($trustedParcels as $index => $parcel) {
@@ -405,42 +404,9 @@ class OpenAiDocumentAnalyzer
             }
 
             $keyCounts[$key] = ($keyCounts[$key] ?? 0) + 1;
-
-            $dept = trim((string) ($parcel['dept'] ?? ''));
-            $com = trim((string) ($parcel['com'] ?? ''));
-            $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
-            $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
-
-            $contextKey = $dept.'|'.$com.'|'.$section;
-            $byContextAndSection[$contextKey][] = [
-                'index' => $index,
-                'numero_plan' => (int) $numeroPlan,
-            ];
         }
 
         $indexesToRemove = [];
-
-        foreach ($byContextAndSection as $items) {
-            if (count($items) < 12) {
-                continue;
-            }
-
-            $numbers = array_values(array_unique(array_map(
-                static fn (array $item): int => $item['numero_plan'],
-                $items
-            )));
-
-            sort($numbers);
-
-            $range = max($numbers) - min($numbers);
-            $density = count($numbers) / max(1, $range + 1);
-
-            if ($range >= 20 && $density >= 0.65) {
-                foreach ($items as $item) {
-                    $indexesToRemove[$item['index']] = true;
-                }
-            }
-        }
 
         foreach ($trustedParcels as $index => $parcel) {
             $key = $this->msaParcelKey($parcel);
@@ -480,7 +446,7 @@ class OpenAiDocumentAnalyzer
             return null;
         }
 
-        if (! preg_match('/^Z[A-Z]$/', $section)) {
+        if (! preg_match('/^[A-Z]{1,2}$/', $section)) {
             return null;
         }
 

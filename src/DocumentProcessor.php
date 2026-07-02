@@ -201,11 +201,6 @@ class DocumentProcessor
 
         $reviewMessages = array_merge($reviewMessages, $review['errors']);
 
-        if ($this->hasSuspiciousMsaExtraction($classification['document_type'], $review['normalized'])) {
-            $needsReview = true;
-            $reviewMessages[] = 'MSA extraction is suspicious: too few parcel rows were extracted for automatic processing.';
-        }
-
         return new ProcessedDocumentResult(
             originalName: $source->originalName,
             mimeType: $source->mimeType,
@@ -220,22 +215,6 @@ class DocumentProcessor
             errorMessage: $needsReview ? implode(' ', $reviewMessages) : null,
             processingId: $source->processingId,
         );
-    }
-
-    /**
-     * @param  array<string, mixed>  $normalized
-     */
-    protected function hasSuspiciousMsaExtraction(string $documentType, array $normalized): bool
-    {
-        if ($documentType !== DocumentProcessingValues::BUSINESS_TYPE_MSA) {
-            return false;
-        }
-
-        $parcels = is_array($normalized['msa_parcels'] ?? null)
-            ? $normalized['msa_parcels']
-            : [];
-
-        return count($parcels) < 5;
     }
 
     /**

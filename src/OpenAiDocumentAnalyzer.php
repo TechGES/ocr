@@ -394,7 +394,6 @@ class OpenAiDocumentAnalyzer
             $trustedParcels[] = $trustedParcel;
         }
 
-        $byContextAndSection = [];
         $keyCounts = [];
 
         foreach ($trustedParcels as $index => $parcel) {
@@ -405,42 +404,9 @@ class OpenAiDocumentAnalyzer
             }
 
             $keyCounts[$key] = ($keyCounts[$key] ?? 0) + 1;
-
-            $dept = trim((string) ($parcel['dept'] ?? ''));
-            $com = trim((string) ($parcel['com'] ?? ''));
-            $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
-            $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
-
-            $contextKey = $dept.'|'.$com.'|'.$section;
-            $byContextAndSection[$contextKey][] = [
-                'index' => $index,
-                'numero_plan' => (int) $numeroPlan,
-            ];
         }
 
         $indexesToRemove = [];
-
-        foreach ($byContextAndSection as $items) {
-            if (count($items) < 12) {
-                continue;
-            }
-
-            $numbers = array_values(array_unique(array_map(
-                static fn (array $item): int => $item['numero_plan'],
-                $items
-            )));
-
-            sort($numbers);
-
-            $range = max($numbers) - min($numbers);
-            $density = count($numbers) / max(1, $range + 1);
-
-            if ($range >= 20 && $density >= 0.65) {
-                foreach ($items as $item) {
-                    $indexesToRemove[$item['index']] = true;
-                }
-            }
-        }
 
         foreach ($trustedParcels as $index => $parcel) {
             $key = $this->msaParcelKey($parcel);
@@ -465,6 +431,7 @@ class OpenAiDocumentAnalyzer
     {
         $dept = trim((string) ($parcel['dept'] ?? ''));
         $com = trim((string) ($parcel['com'] ?? ''));
+        $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
         $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
         $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
 
@@ -480,7 +447,11 @@ class OpenAiDocumentAnalyzer
             return null;
         }
 
-        if (! preg_match('/^Z[A-Z]$/', $section)) {
+        if ($prefixe !== '' && ! preg_match('/^\d{3}$/', $prefixe)) {
+            return null;
+        }
+
+        if (! preg_match('/^[A-Z]{1,2}$/', $section)) {
             return null;
         }
 
@@ -510,7 +481,7 @@ class OpenAiDocumentAnalyzer
 
         $parcel['dept'] = $dept;
         $parcel['com'] = $com;
-        $parcel['prefixe'] = '';
+        $parcel['prefixe'] = $prefixe;
         $parcel['section'] = $section;
         $parcel['numero_plan'] = $numeroPlan;
 
@@ -624,12 +595,93 @@ class OpenAiDocumentAnalyzer
         $analysis = $this->normalizeAnalysis($payload);
 
         if (($analysis['classification']['document_type'] ?? '') === DocumentProcessingValues::BUSINESS_TYPE_MSA) {
-            $analysis['extraction']['msa_parcels'] = $this->filterSuspiciousMsaLlmParcels(
-                is_array($analysis['extraction']['msa_parcels'] ?? null) ? $analysis['extraction']['msa_parcels'] : []
-            );
+            $msaParcels = is_array($analysis['extraction']['msa_parcels'] ?? null)
+                ? $analysis['extraction']['msa_parcels']
+                : [];
+
+            $cadastralParcels = is_array($analysis['extraction']['cadastral_parcels'] ?? null)
+                ? $analysis['extraction']['cadastral_parcels']
+                : [];
+
+            $analysis['extraction']['msa_parcels'] = $this->filterSuspiciousMsaLlmParcels([
+                ...$msaParcels,
+                ...$this->convertCadastralParcelsToMsaParcels($cadastralParcels, $msaParcels),
+            ]);
         }
 
         return $analysis;
+    }
+
+    /**
+     * @param  array<int, mixed>  $parcels
+     * @param  array<int, mixed>  $contextParcels
+     * @return array<int, array<string, mixed>>
+     */
+    private function convertCadastralParcelsToMsaParcels(array $parcels, array $contextParcels): array
+    {
+        $msaParcels = [];
+
+        $context = $this->dominantMsaContext($contextParcels);
+
+        foreach ($parcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $section = $parcel['section'] ?? null;
+            $numero = $parcel['numero'] ?? null;
+
+            if ($section === null || $numero === null) {
+                continue;
+            }
+
+            $msaParcels[] = [
+                'dept' => $parcel['dept'] ?? $context['dept'],
+                'com' => $parcel['com'] ?? $context['com'],
+                'prefixe' => $parcel['prefixe'] ?? '',
+                'section' => $section,
+                'numero_plan' => $numero,
+            ];
+        }
+
+        return $msaParcels;
+    }
+
+    /**
+     * @param  array<int, mixed>  $parcels
+     * @return array{dept: string, com: string}
+     */
+    private function dominantMsaContext(array $parcels): array
+    {
+        $counts = [];
+
+        foreach ($parcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+
+            if ($dept === '' || $com === '') {
+                continue;
+            }
+
+            $key = $dept.'|'.$com;
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
+        }
+
+        arsort($counts);
+
+        $key = array_key_first($counts);
+
+        if ($key === null) {
+            return ['dept' => '', 'com' => ''];
+        }
+
+        [$dept, $com] = explode('|', $key);
+
+        return ['dept' => $dept, 'com' => $com];
     }
 
     private function buildTextPrompt(string $text): string
@@ -678,6 +730,9 @@ class OpenAiDocumentAnalyzer
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
             "Pour les documents MSA, traite toutes les pages fournies et retourne toutes les lignes visibles du tableau, meme s il y en a plus de 200.\n".
             "Pour MSA, lis uniquement les colonnes cadastrales utiles: DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
+            "Pour MSA, PREFIXE est une colonne cadastrale distincte située entre COM et SECTION. Si une valeur de 3 chiffres est visible dans cette colonne, retourne-la dans prefixe exactement sur 3 chiffres.\n".
+            "Pour MSA, ne mets pas prefixe vide si une valeur comme 363 est visible entre COM et SECTION sur la ligne cadastrale.\n".
+            "Exemple MSA: '49 050 363 ZM 0212' donne dept='49', com='050', prefixe='363', section='ZM', numero_plan='0212'.\n".
             "Pour MSA, ne confonds jamais les colonnes COMPTES PROPRIETAIRES avec les colonnes de parcelle.\n".
             "Pour MSA, les groupes comme 'D 00225', 'C 00100', 'D 00068', 'S 00027', 'B 00144' correspondent au compte proprietaire et ne doivent jamais etre retournes comme section ou numero_plan.\n".
             "Pour MSA, SECTION est generalement la paire alphabetique situee apres le compte proprietaire: exemples ZX, ZS, ZR, ZY, ZZ, ZA, ZD, ZH.\n".

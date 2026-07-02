@@ -167,7 +167,7 @@ it('normalizes MSA parcel rows with carry-forward, padding, section normalizatio
             [
                 'dept' => '01',
                 'com' => '023',
-                'prefixe' => '007',
+                'prefixe' => '',
                 'section' => 'ZD',
                 'numero_plan' => '0009',
             ],
@@ -287,6 +287,63 @@ it('keeps rare but valid MSA departments when another department is dominant', f
             'prefixe' => '',
             'section' => 'ZH',
             'numero_plan' => '0055',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('does not pad short MSA prefix values', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => [
+            [
+                'dept' => '85',
+                'com' => '254',
+                'prefixe' => '1',
+                'section' => 'A',
+                'numero_plan' => '0750',
+            ],
+            [
+                'dept' => '85',
+                'com' => '080',
+                'prefixe' => '091',
+                'section' => 'ZL',
+                'numero_plan' => '0089',
+            ],
+            [
+                'dept' => '49',
+                'com' => '367',
+                'prefixe' => '249',
+                'section' => 'ZM',
+                'numero_plan' => '0007',
+            ],
+        ],
+    ]);
+
+    expect($result['normalized']['msa_parcels'])->toMatchArray([
+        [
+            'dept' => '85',
+            'com' => '254',
+            'prefixe' => '',
+            'section' => '0A',
+            'numero_plan' => '0750',
+        ],
+        [
+            'dept' => '85',
+            'com' => '080',
+            'prefixe' => '091',
+            'section' => 'ZL',
+            'numero_plan' => '0089',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '249',
+            'section' => 'ZM',
+            'numero_plan' => '0007',
         ],
     ]);
 

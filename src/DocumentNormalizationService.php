@@ -517,7 +517,7 @@ class DocumentNormalizationService
                 $com = $lastCom;
             }
 
-            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
+            $prefixe = $this->normalizeMsaPrefixe($this->firstStringValue($rowPayload, ['prefixe', 'prefix']));
             $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
             $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
 
@@ -978,6 +978,30 @@ class DocumentNormalizationService
         }
 
         return str_pad($digits, $length, '0', STR_PAD_LEFT);
+    }
+
+    private function normalizeMsaPrefixe(string $value): string
+    {
+        $raw = trim($value);
+
+        if ($raw === '') {
+            return '';
+        }
+
+        $digits = preg_replace('/\D+/u', '', $raw) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        // Le préfixe MSA doit être lu comme une valeur cadastrale explicite sur 3 chiffres.
+        // Contrairement aux autres champs, on ne pad pas 1 ou 2 chiffres :
+        // une poussière OCR "1" ne doit pas devenir "001".
+        if (strlen($digits) !== 3) {
+            return '';
+        }
+
+        return $digits;
     }
 
     private function normalizeMsaSection(string $value): string

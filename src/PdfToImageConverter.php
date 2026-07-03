@@ -17,9 +17,13 @@ class PdfToImageConverter
 
         $outputPrefix = rtrim($outputDirectory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'page';
         $errorFile = tempnam(sys_get_temp_dir(), 'pdftoppm-error-');
+        $dpi = (int) config('ges-ocr.processing.pdf_dpi', 0);
+        $dpiArgument = $dpi > 0 ? '-r '.$dpi.' ' : '';
         $pageLimitArgument = $maxPages > 0 ? '-f 1 -l '.(int) $maxPages.' ' : '';
+
         $command = sprintf(
-            'pdftoppm -png %s%s %s 2> %s',
+            'pdftoppm -png %s%s%s %s 2> %s',
+            $dpiArgument,
             $pageLimitArgument,
             escapeshellarg($pdfPath),
             escapeshellarg($outputPrefix),

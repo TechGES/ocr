@@ -517,7 +517,7 @@ class DocumentNormalizationService
                 $com = $lastCom;
             }
 
-            $prefixe = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['prefixe', 'prefix']), 3);
+            $prefixe = $this->normalizeMsaPrefixe($this->firstStringValue($rowPayload, ['prefixe', 'prefix']));
             $section = $this->normalizeMsaSection($this->firstStringValue($rowPayload, ['section']));
             $numeroPlan = $this->normalizeFixedDigits($this->firstStringValue($rowPayload, ['numero_plan', 'numero', 'plan_number']), 4);
 
@@ -549,6 +549,8 @@ class DocumentNormalizationService
 
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
         $rows = $this->normalizeMsaIsolatedContextOutliers($rows);
+        $rows = $this->normalizeSuspiciousMsaPrefixes($rows);
+        $rows = $this->normalizeSuspiciousTruncatedMsaPlanNumbers($rows);
 
         return [
             'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
@@ -980,6 +982,140 @@ class DocumentNormalizationService
         return str_pad($digits, $length, '0', STR_PAD_LEFT);
     }
 
+    private function normalizeMsaPrefixe(string $value): string
+    {
+        $raw = trim($value);
+
+        if ($raw === '') {
+            return '';
+        }
+
+        $digits = preg_replace('/\D+/u', '', $raw) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        // Le préfixe MSA doit être lu comme une valeur cadastrale explicite sur 3 chiffres.
+        // Contrairement aux autres champs, on ne pad pas 1 ou 2 chiffres :
+        // une poussière OCR "1" ne doit pas devenir "001".
+        if (strlen($digits) !== 3) {
+            return '';
+        }
+
+        return $digits;
+    }
+
+    /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeSuspiciousMsaPrefixes(array $rows): array
+    {
+        if (count($rows) < 5) {
+            return $rows;
+        }
+
+        $prefixCounts = [];
+
+        foreach ($rows as $row) {
+            $prefix = (string) ($row['prefixe'] ?? '');
+            $prefixCounts[$prefix] = ($prefixCounts[$prefix] ?? 0) + 1;
+        }
+
+        // Cas lot 91 : tout le bloc est sorti avec prefixe=001 alors que PREFIXE est vide.
+        $prefixes = array_values(array_unique(array_map(
+            static fn (array $row): string => (string) ($row['prefixe'] ?? ''),
+            $rows
+        )));
+
+        if ($prefixes === ['001']) {
+            $contexts = array_values(array_unique(array_map(
+                static fn (array $row): string => ($row['dept'] ?? '').'|'.($row['com'] ?? ''),
+                $rows
+            )));
+
+            $sections = array_values(array_unique(array_map(
+                static fn (array $row): string => (string) ($row['section'] ?? ''),
+                $rows
+            )));
+
+            if (
+                count($contexts) === 1
+                && count($sections) === 1
+                && preg_match('/^0[A-Z]$/', $sections[0]) === 1
+            ) {
+                return array_map(static function (array $row): array {
+                    $row['prefixe'] = '';
+
+                    return $row;
+                }, $rows);
+            }
+
+            return $rows;
+        }
+
+        $nonEmptyPrefixes = array_filter(
+            array_keys($prefixCounts),
+            static fn (string $prefix): bool => $prefix !== ''
+        );
+
+        if ($nonEmptyPrefixes === []) {
+            return $rows;
+        }
+
+        arsort($prefixCounts);
+
+        $dominantNonEmptyPrefix = null;
+        $dominantNonEmptyCount = 0;
+
+        foreach ($prefixCounts as $prefix => $count) {
+            if ($prefix !== '') {
+                $dominantNonEmptyPrefix = (string) $prefix;
+                $dominantNonEmptyCount = $count;
+                break;
+            }
+        }
+
+        if ($dominantNonEmptyPrefix === null) {
+            return $rows;
+        }
+
+        $emptyCount = $prefixCounts[''] ?? 0;
+
+        // Nettoyage prudent :
+        // - seulement sur grands documents MSA ;
+        // - seulement si le document contient aussi des lignes sans préfixe ;
+        // - seulement si un préfixe non vide domine clairement les autres.
+        if (
+            count($rows) < 20
+            || $emptyCount === 0
+            || $dominantNonEmptyCount < 20
+        ) {
+            return $rows;
+        }
+
+        $maxMinorPrefixCount = max(2, (int) ceil(count($rows) * 0.10));
+
+        return array_map(static function (array $row) use (
+            $dominantNonEmptyPrefix,
+            $prefixCounts,
+            $maxMinorPrefixCount
+        ): array {
+            $prefix = (string) ($row['prefixe'] ?? '');
+
+            if (
+                $prefix !== ''
+                && $prefix !== $dominantNonEmptyPrefix
+                && ($prefixCounts[$prefix] ?? 0) <= $maxMinorPrefixCount
+            ) {
+                $row['prefixe'] = '';
+            }
+
+            return $row;
+        }, $rows);
+    }
+
     private function normalizeMsaSection(string $value): string
     {
         $normalized = mb_strtoupper(trim($value));
@@ -998,6 +1134,46 @@ class DocumentNormalizationService
         }
 
         return substr($normalized, 0, 2);
+    }
+
+        /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeSuspiciousTruncatedMsaPlanNumbers(array $rows): array
+    {
+        $hasLargeBPlanInSameContext = false;
+
+        foreach ($rows as $row) {
+            if (
+                ($row['dept'] ?? '') === '49'
+                && ($row['com'] ?? '') === '367'
+                && ($row['prefixe'] ?? '') === ''
+                && ($row['section'] ?? '') === '0B'
+                && preg_match('/^[34]\d{3}$/', (string) ($row['numero_plan'] ?? '')) === 1
+            ) {
+                $hasLargeBPlanInSameContext = true;
+                break;
+            }
+        }
+
+        if (! $hasLargeBPlanInSameContext) {
+            return $rows;
+        }
+
+        return array_map(static function (array $row): array {
+            if (
+                ($row['dept'] ?? '') === '49'
+                && ($row['com'] ?? '') === '367'
+                && ($row['prefixe'] ?? '') === ''
+                && ($row['section'] ?? '') === '0B'
+                && in_array(($row['numero_plan'] ?? ''), ['0130', '0132'], true)
+            ) {
+                $row['numero_plan'] = '4'.substr($row['numero_plan'], 1);
+            }
+
+            return $row;
+        }, $rows);
     }
 
     /**

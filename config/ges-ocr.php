@@ -35,5 +35,6 @@ return [
     ],
     'processing' => [
         'cleanup_temporary_files' => filter_var(env('GES_OCR_CLEANUP_TEMPORARY_FILES', true), FILTER_VALIDATE_BOOL),
+        'pdf_dpi' => (int) env('GES_OCR_PDF_DPI', 0),
     ],
 ];

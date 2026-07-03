@@ -76,3 +76,38 @@ it('analyzes a document in one structured openai request', function () {
         ->and($result['extraction']['document_type'])->toBe(DocumentProcessingValues::BUSINESS_TYPE_KBIS)
         ->and($result['extraction']['registration_number'])->toBe('123 456 789 R.C.S. Paris');
 });
+
+it('extracts simple-letter MSA sections from text fallback', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(\Ges\Ocr\Contracts\LlmClient::class),
+        new DocumentSchemaFactory
+    );
+
+    $parcels = $analyzer->extractMsaTextParcels(<<<'TEXT'
+49 036 A 00014 0                      B 0146                      057
+                                         B 0148                      047
+                                         B 0150                      05P
+49 036 C 00135                        C 0035                      037
+TEXT);
+
+    $parcelB0146 = array_values(array_filter(
+        $parcels,
+        static fn (array $parcel): bool =>
+            ($parcel['dept'] ?? '') === '49'
+            && ($parcel['com'] ?? '') === '036'
+            && ($parcel['section'] ?? '') === '0B'
+            && ($parcel['numero_plan'] ?? '') === '0146'
+    ));
+
+    $parcelC0035 = array_values(array_filter(
+        $parcels,
+        static fn (array $parcel): bool =>
+            ($parcel['dept'] ?? '') === '49'
+            && ($parcel['com'] ?? '') === '036'
+            && ($parcel['section'] ?? '') === '0C'
+            && ($parcel['numero_plan'] ?? '') === '0035'
+    ));
+
+    expect($parcelB0146)->not->toBeEmpty();
+    expect($parcelC0035)->not->toBeEmpty();
+});

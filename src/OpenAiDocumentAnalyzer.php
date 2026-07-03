@@ -22,11 +22,43 @@ class OpenAiDocumentAnalyzer
     {
         $llmParcels = $this->filterSuspiciousMsaLlmParcels($llmParcels);
 
-        if ($llmParcels !== []) {
+        if ($llmParcels === []) {
+            return array_values($textParcels);
+        }
+
+        if ($textParcels === []) {
             return array_values($llmParcels);
         }
 
-        return array_values($textParcels);
+        $merged = [];
+        $seen = [];
+
+        foreach (array_merge($llmParcels, $textParcels) as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = (string) ($parcel['dept'] ?? '');
+            $com = (string) ($parcel['com'] ?? '');
+            $prefixe = (string) ($parcel['prefixe'] ?? '');
+            $section = (string) ($parcel['section'] ?? '');
+            $numeroPlan = (string) ($parcel['numero_plan'] ?? '');
+
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
+
+            $key = $dept.'|'.$com.'|'.$prefixe.'|'.$section.'|'.$numeroPlan;
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $merged[] = $parcel;
+        }
+
+        return $merged;
     }
 
     private function detectMsaDocumentDept(string $text): string
@@ -78,7 +110,7 @@ class OpenAiDocumentAnalyzer
             }
 
             preg_match_all(
-                '/(?<![A-Z0-9])([Z2][A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
+                '/(?<![A-Z0-9])([A-HM-Z]|Z[A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
                 $line,
                 $matches,
                 PREG_SET_ORDER
@@ -109,6 +141,14 @@ class OpenAiDocumentAnalyzer
         }
 
         return $this->fillMissingMsaTextContexts($parcels);
+    }
+
+    /**
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    public function extractMsaTextParcels(string $text): array
+    {
+        return $this->extractMsaParcelsFromText($text);
     }
 
     /**
@@ -516,9 +556,10 @@ class OpenAiDocumentAnalyzer
 
     /**
      * @param  array<int, string>  $imagePaths
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
-    public function analyzeMsaImagesPageByPage(array $imagePaths): array
+    public function analyzeMsaImagesPageByPage(array $imagePaths, array $textParcels = []): array
     {
         $mergedParcels = [];
         $bestClassification = [
@@ -562,9 +603,7 @@ class OpenAiDocumentAnalyzer
             ];
         }
 
-        $filteredParcels = $this->filterSuspiciousMsaLlmParcels($mergedParcels);
-
-        $baseExtraction['msa_parcels'] = $filteredParcels;
+        $baseExtraction['msa_parcels'] = $this->mergeMsaParcels($mergedParcels, $textParcels);
 
         return [
             'classification' => [
@@ -730,9 +769,19 @@ class OpenAiDocumentAnalyzer
             "Pour les documents MSA de parcelles, retourne une ligne distincte dans msa_parcels pour chaque ligne de tableau visible.\n".
             "Pour les documents MSA, traite toutes les pages fournies et retourne toutes les lignes visibles du tableau, meme s il y en a plus de 200.\n".
             "Pour MSA, lis uniquement les colonnes cadastrales utiles: DEPT, COM, PREFIXE, SECTION et NUMERO PLAN.\n".
-            "Pour MSA, PREFIXE est une colonne cadastrale distincte située entre COM et SECTION. Si une valeur de 3 chiffres est visible dans cette colonne, retourne-la dans prefixe exactement sur 3 chiffres.\n".
-            "Pour MSA, ne mets pas prefixe vide si une valeur comme 363 est visible entre COM et SECTION sur la ligne cadastrale.\n".
+            "Pour MSA, PREFIXE est une colonne cadastrale distincte située entre COM et SECTION. Si cette colonne est vide sur la ligne, retourne prefixe=''.\n".
+            "Pour MSA, COM est toujours le code commune sur 3 chiffres placé juste apres DEPT. PREFIXE est la colonne distincte placee apres COM.\n".
+            "Pour MSA, ne deplace jamais une valeur visible dans PREFIXE vers COM. Exemple: '49 367 043 A 1452' donne dept='49', com='367', prefixe='043', section='A', numero_plan='1452'. Il ne faut jamais retourner com='043'.\n".
+            "Pour MSA, une valeur comme 043 repetee dans la colonne PREFIXE doit rester prefixe='043' et ne doit jamais remplacer le code commune courant.\n".
+            "Pour MSA, BTQ, Sub.Fisc, groupe, culture et les lettres J, K, L affichees apres NUMERO PLAN ne sont pas des sections cadastrales.\n".
+            "Pour MSA, ne transforme jamais une subdivision/BTQ J, K ou L en section='J', 'K', 'L', '0J', '0K' ou '0L'.\n".
+            "Exemple MSA: '043 A 1458 J 03 T' donne prefixe='043', section='A', numero_plan='1458'. Il ne faut pas retourner section='J'.\n".
+            "Pour MSA, un numero_plan doit conserver ses 4 chiffres visibles. Ne transforme jamais 4130 en 0130 ni 4132 en 0132.\n".
+            "Pour MSA, ne déduis jamais prefixe='001' par défaut lorsque la colonne PREFIXE est vide.\n".
+            "Pour MSA, ne remplis prefixe que si une valeur de 3 chiffres est explicitement visible dans la colonne PREFIXE.\n".
+            "Pour MSA, si une valeur comme 363, 249 ou 091 est visible entre COM et SECTION sur la ligne cadastrale, retourne-la dans prefixe exactement sur 3 chiffres.\n".
             "Exemple MSA: '49 050 363 ZM 0212' donne dept='49', com='050', prefixe='363', section='ZM', numero_plan='0212'.\n".
+            "Exemple MSA avec PREFIXE vide: '85 254 A 0750' donne dept='85', com='254', prefixe='', section='A', numero_plan='0750'. Il ne faut jamais retourner prefixe='001'.\n".
             "Pour MSA, ne confonds jamais les colonnes COMPTES PROPRIETAIRES avec les colonnes de parcelle.\n".
             "Pour MSA, les groupes comme 'D 00225', 'C 00100', 'D 00068', 'S 00027', 'B 00144' correspondent au compte proprietaire et ne doivent jamais etre retournes comme section ou numero_plan.\n".
             "Pour MSA, SECTION est generalement la paire alphabetique situee apres le compte proprietaire: exemples ZX, ZS, ZR, ZY, ZZ, ZA, ZD, ZH.\n".
@@ -774,6 +823,10 @@ class OpenAiDocumentAnalyzer
             "Exemple MSA: '85 055 B 00143 O ... ZI 0030' donne dept=85, com=055, prefixe='', section='ZI', numero_plan='0030'.\n".
             "Exemple MSA: '85 055 M 00042 ... ZD 0026 ... A 03 T' donne section='ZD' et numero_plan='0026'. Il ne faut jamais utiliser 'A 03 T' pour construire la parcelle.\n".
             "Pour MSA, quand plusieurs lignes sont empilees sous la meme tete de compte et que seules les paires comme 'ZD 0006', 'ZD 0007', 'ZD 0011', 'ZD 0016', 'ZD 0026', 'ZD 0041' changent, retourne une entree par paire visible.\n".
+            "Pour MSA, un NUMERO PLAN cadastral peut commencer par 4. Ne corrige jamais un numero visible 4130, 4132, 3983, 3985, 3928, etc. en 0130, 0132, 0983 ou autre valeur tronquee.\n".
+            "Pour MSA, ne supprime jamais le premier chiffre d'un NUMERO PLAN a 4 chiffres. Le numero_plan doit conserver exactement les 4 chiffres visibles dans la colonne NUMERO PLAN.\n".
+            "Exemple MSA: section='B', numero_plan='4130' doit rester numero_plan='4130'. Il ne faut jamais retourner '0130'.\n".
+            "Exemple MSA: section='B', numero_plan='4132' doit rester numero_plan='4132'. Il ne faut jamais retourner '0132'.\n".
             "Avant de repondre pour MSA, verifie qu aucune ligne ne contient section='03' ou numero_plan='0000' sauf si le document montre exactement cette valeur dans la bonne colonne, ce qui est normalement impossible.\n".
             "N invente aucune information.";
     }

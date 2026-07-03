@@ -124,24 +124,41 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
     $documentExtractor->shouldNotReceive('extractFromText');
 
     $openAiDocumentAnalyzer = Mockery::mock(OpenAiDocumentAnalyzer::class);
+    $openAiDocumentAnalyzer->shouldReceive('extractMsaTextParcels')
+        ->once()
+        ->with(Mockery::type('string'))
+        ->andReturn([
+            [
+                'dept' => '85',
+                'com' => '243',
+                'prefixe' => '',
+                'section' => '0A',
+                'numero_plan' => '1150',
+            ],
+        ]);
+
     $openAiDocumentAnalyzer->shouldReceive('analyzeMsaImagesPageByPage')
         ->once()
-        ->with(Mockery::type('array'))
+        ->with(Mockery::type('array'), Mockery::on(
+            fn (array $textParcels): bool =>
+                ($textParcels[0]['section'] ?? null) === '0A'
+                && ($textParcels[0]['numero_plan'] ?? null) === '1150'
+        ))
         ->andReturn([
             'classification' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
-                'confidence' => 0.99,
-                'review_reason' => '',
+                'confidence' => 0.95,
+                'review_reason' => 'MSA analysé page par page.',
             ],
             'extraction' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
                 'msa_parcels' => [
                     [
                         'dept' => '85',
-                        'com' => '006',
+                        'com' => '243',
                         'prefixe' => '',
-                        'section' => 'ZA',
-                        'numero_plan' => '0025',
+                        'section' => '0A',
+                        'numero_plan' => '1150',
                     ],
                 ],
             ],
@@ -169,7 +186,8 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
     $result = $processor->processFile($path, 'application/pdf', 'MSA.pdf');
 
     expect($result->documentType)->toBe(DocumentProcessingValues::BUSINESS_TYPE_MSA)
-        ->and($result->rawExtractionJson['msa_parcels'][0]['section'])->toBe('ZA')
-        ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('ZA')
-        ->and($result->normalizedJson['msa_parcels'][0]['numero_plan'])->toBe('0025');
+        ->and($result->rawExtractionJson['msa_parcels'][0]['section'])->toBe('0A')
+        ->and($result->rawExtractionJson['msa_parcels'][0]['numero_plan'])->toBe('1150')
+        ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('0A')
+        ->and($result->normalizedJson['msa_parcels'][0]['numero_plan'])->toBe('1150');
 });

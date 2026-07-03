@@ -350,3 +350,94 @@ it('does not pad short MSA prefix values', function () {
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('removes suspicious default MSA prefix 001 on single simple-section blocks', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => [
+            ['dept' => '85', 'com' => '254', 'prefixe' => '001', 'section' => 'A', 'numero_plan' => '0750'],
+            ['dept' => '85', 'com' => '254', 'prefixe' => '001', 'section' => 'A', 'numero_plan' => '0748'],
+            ['dept' => '85', 'com' => '254', 'prefixe' => '001', 'section' => 'A', 'numero_plan' => '0512'],
+            ['dept' => '85', 'com' => '254', 'prefixe' => '001', 'section' => 'A', 'numero_plan' => '0514'],
+            ['dept' => '85', 'com' => '254', 'prefixe' => '001', 'section' => 'A', 'numero_plan' => '0516'],
+        ],
+    ]);
+
+    expect($result['normalized']['msa_parcels'])->each(
+        fn ($row) => $row->toHaveKey('prefixe', '')
+    );
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('restores truncated MSA plan numbers in known high-number contexts', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => [
+            ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => 'B', 'numero_plan' => '3983'],
+            ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => 'B', 'numero_plan' => '0130'],
+            ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => 'B', 'numero_plan' => '0132'],
+        ],
+    ]);
+
+    expect($result['normalized']['msa_parcels'])->toMatchArray([
+        ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => '0B', 'numero_plan' => '3983'],
+        ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => '0B', 'numero_plan' => '4130'],
+        ['dept' => '49', 'com' => '367', 'prefixe' => '', 'section' => '0B', 'numero_plan' => '4132'],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('clears minor suspicious MSA prefixes when one explicit prefix dominates', function () {
+    $service = new DocumentNormalizationService;
+
+    $parcels = [];
+
+    for ($i = 1; $i <= 30; $i++) {
+        $parcels[] = [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '043',
+            'section' => 'B',
+            'numero_plan' => str_pad((string) (1000 + $i), 4, '0', STR_PAD_LEFT),
+        ];
+    }
+
+    for ($i = 1; $i <= 20; $i++) {
+        $parcels[] = [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => 'ZK',
+            'numero_plan' => str_pad((string) $i, 4, '0', STR_PAD_LEFT),
+        ];
+    }
+
+    $parcels[] = ['dept' => '49', 'com' => '367', 'prefixe' => '001', 'section' => 'ZB', 'numero_plan' => '0017'];
+    $parcels[] = ['dept' => '49', 'com' => '367', 'prefixe' => '040', 'section' => 'ZM', 'numero_plan' => '0039'];
+    $parcels[] = ['dept' => '49', 'com' => '367', 'prefixe' => '056', 'section' => 'ZM', 'numero_plan' => '0017'];
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_MSA, [
+        'msa_parcels' => $parcels,
+    ]);
+
+    $prefixCounts = [];
+    foreach ($result['normalized']['msa_parcels'] as $row) {
+        $prefix = $row['prefixe'] ?? '';
+        $prefixCounts[$prefix] = ($prefixCounts[$prefix] ?? 0) + 1;
+    }
+
+    expect($prefixCounts['043'] ?? 0)->toBe(30);
+    expect($prefixCounts['001'] ?? 0)->toBe(0);
+    expect($prefixCounts['040'] ?? 0)->toBe(0);
+    expect($prefixCounts['056'] ?? 0)->toBe(0);
+    expect($prefixCounts[''] ?? 0)->toBe(23);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});

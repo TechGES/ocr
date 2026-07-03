@@ -61,7 +61,9 @@ class DocumentProcessor
                 $pageImages = $this->pdfToImageConverter->convert($source->path, $temporaryImageDirectory, $maxPages);
                 $pageCount = count($pageImages);
 
-                $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage($pageImages);
+                $textParcels = $this->openAiDocumentAnalyzer->extractMsaTextParcels((string) $extractedText);
+
+                $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage($pageImages, $textParcels);
 
                 $classification = $analysis['classification'];
                 $extraction = $analysis['extraction'];

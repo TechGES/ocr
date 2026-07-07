@@ -68,8 +68,6 @@ class OpenAiDocumentAnalyzer
      */
     private function removeConflictingMsaPrefixes(array $parcels, array $textParcels = []): array
     {
-        $suspectPrefixes = ['001', '011', '048', '064', '102'];
-
         $normalizedParcels = [];
 
         foreach ($parcels as $parcel) {
@@ -100,19 +98,14 @@ class OpenAiDocumentAnalyzer
             ];
         }
 
+        $contextCounts = [];
         $prefixHints = [];
 
         foreach ($normalizedParcels as $parcel) {
-            $dept = $parcel['dept'];
-            $com = $parcel['com'];
-            $prefixe = $parcel['prefixe'];
-            $section = $parcel['section'];
-            $numeroPlan = $parcel['numero_plan'];
+            $contextCounts[$parcel['dept'].'|'.$parcel['com']] = ($contextCounts[$parcel['dept'].'|'.$parcel['com']] ?? 0) + 1;
 
-            // Cas MSA fréquent : le prefixe est lu, mais aussi utilisé à tort comme COM.
-            // Exemple: 85 224 224 0G 0949 est une ligne support pour 85 146 224 0G 0949.
-            if ($prefixe !== '' && ! in_array($prefixe, $suspectPrefixes, true) && $com === $prefixe) {
-                $prefixHints[$dept.'|'.$section.'|'.$numeroPlan] = $prefixe;
+            if ($parcel['prefixe'] !== '' && $parcel['com'] === $parcel['prefixe']) {
+                $prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']] = $parcel['prefixe'];
             }
         }
 
@@ -132,70 +125,45 @@ class OpenAiDocumentAnalyzer
             $enriched[] = $parcel;
         }
 
-        $prefixesBySectionNumber = [];
-        $prefixesByDeptSectionNumber = [];
+        $prefixesByExactParcelWithoutPrefix = [];
+        $rowsBySectionNumber = [];
 
         foreach ($enriched as $parcel) {
+            $exactWithoutPrefixKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
             $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
-            $deptSectionNumberKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
 
-            $prefixesBySectionNumber[$sectionNumberKey][$parcel['prefixe']] = true;
-            $prefixesByDeptSectionNumber[$deptSectionNumberKey][$parcel['prefixe']] = true;
+            $prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey][$parcel['prefixe']] = true;
+            $rowsBySectionNumber[$sectionNumberKey][] = $parcel;
         }
 
         $filtered = [];
 
         foreach ($enriched as $parcel) {
-            $dept = $parcel['dept'];
-            $com = $parcel['com'];
-            $prefixe = $parcel['prefixe'];
-            $section = $parcel['section'];
-            $numeroPlan = $parcel['numero_plan'];
+            $exactWithoutPrefixKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+            $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
+            $contextKey = $parcel['dept'].'|'.$parcel['com'];
 
-            $sectionNumberKey = $section.'|'.$numeroPlan;
-            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+            $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
+            $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);
 
-            $sectionNumberPrefixes = array_keys($prefixesBySectionNumber[$sectionNumberKey] ?? []);
-            $deptSectionNumberPrefixes = array_keys($prefixesByDeptSectionNumber[$deptSectionNumberKey] ?? []);
-
-            $hasEmptyForSameSectionNumber = in_array('', $sectionNumberPrefixes, true);
-            $hasTrustedPrefixForSameDept = count(array_diff(
-                array_filter($deptSectionNumberPrefixes, fn (string $candidate): bool => $candidate !== ''),
-                $suspectPrefixes
-            )) > 0;
-
-            // Cas 1 : si une même section/numéro existe avec prefixe vide,
-            // les préfixes propriétaires connus comme suspects sont écartés,
-            // même si dept/com diffèrent.
-            // Exemple: garder 85/216/ZB0034 et écarter 11/262/102/ZB0034.
             if (
-                $prefixe !== ''
-                && in_array($prefixe, $suspectPrefixes, true)
-                && $hasEmptyForSameSectionNumber
+                $parcel['prefixe'] !== ''
+                && $hasExactEmptyVariant
+                && ! isset($prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']])
             ) {
                 continue;
             }
 
-            // Cas 2 : si le même dept + section + numéro existe avec un vrai prefixe cadastral,
-            // on écarte la variante sans prefixe.
-            // Exemple: garder 85/146/224/0G0949 plutôt que 85/146/vide/0G0949.
-            if ($prefixe === '' && $hasTrustedPrefixForSameDept) {
-                continue;
-            }
-
-            // Cas 3 : écarter les lignes support où COM = PREFIXE
-            // si une meilleure ligne existe avec le même dept/prefixe/section/numéro mais un autre COM.
-            // Exemple: écarter 85/224/224/0G0949 si 85/146/224/0G0949 existe.
-            if ($prefixe !== '' && $com === $prefixe) {
+            if ($parcel['prefixe'] !== '' && $parcel['com'] === $parcel['prefixe']) {
                 $hasBetterComForSamePrefix = false;
 
                 foreach ($enriched as $candidate) {
                     if (
-                        $candidate['dept'] === $dept
-                        && $candidate['prefixe'] === $prefixe
-                        && $candidate['section'] === $section
-                        && $candidate['numero_plan'] === $numeroPlan
-                        && $candidate['com'] !== $com
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['prefixe'] === $parcel['prefixe']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['com'] !== $parcel['com']
                     ) {
                         $hasBetterComForSamePrefix = true;
                         break;
@@ -207,12 +175,35 @@ class OpenAiDocumentAnalyzer
                 }
             }
 
+            if ($parcel['prefixe'] !== '') {
+                $currentContextCount = $contextCounts[$contextKey] ?? 0;
+                $hasStrongerEmptyContext = false;
+
+                foreach ($rowsBySectionNumber[$sectionNumberKey] ?? [] as $candidate) {
+                    if ($candidate['prefixe'] !== '') {
+                        continue;
+                    }
+
+                    $candidateContextKey = $candidate['dept'].'|'.$candidate['com'];
+                    $candidateContextCount = $contextCounts[$candidateContextKey] ?? 0;
+
+                    if ($candidateContextCount > $currentContextCount) {
+                        $hasStrongerEmptyContext = true;
+                        break;
+                    }
+                }
+
+                if ($hasStrongerEmptyContext) {
+                    continue;
+                }
+            }
+
             $dedupeKey = implode('|', [
-                $dept,
-                $com,
-                $prefixe,
-                $section,
-                $numeroPlan,
+                $parcel['dept'],
+                $parcel['com'],
+                $parcel['prefixe'],
+                $parcel['section'],
+                $parcel['numero_plan'],
             ]);
 
             $filtered[$dedupeKey] = $parcel;

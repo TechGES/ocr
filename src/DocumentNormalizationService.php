@@ -1123,7 +1123,6 @@ class DocumentNormalizationService
      */
     private function normalizeMsaPrefixConflicts(array $rows): array
     {
-        $suspectPrefixes = ['001', '011', '048', '064', '102'];
         $normalizedRows = [];
 
         foreach ($rows as $row) {
@@ -1134,6 +1133,7 @@ class DocumentNormalizationService
             $normalizedRows[] = $row;
         }
 
+        $contextCounts = [];
         $prefixHints = [];
 
         foreach ($normalizedRows as $row) {
@@ -1143,18 +1143,16 @@ class DocumentNormalizationService
             $section = (string) ($row['section'] ?? '');
             $numeroPlan = (string) ($row['numero_plan'] ?? '');
 
-            if (
-                $dept === ''
-                || $com === ''
-                || $prefixe === ''
-                || $section === ''
-                || $numeroPlan === ''
-                || in_array($prefixe, $suspectPrefixes, true)
-            ) {
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
                 continue;
             }
 
-            if ($com === $prefixe) {
+            $contextCounts[$dept.'|'.$com] = ($contextCounts[$dept.'|'.$com] ?? 0) + 1;
+
+            // Cas MSA : une ligne support peut porter le vrai prefixe, mais avec COM = PREFIXE.
+            // Exemple support : 85|224|224|0G|0949
+            // Elle sert à enrichir la vraie ligne : 85|146|224|0G|0949.
+            if ($prefixe !== '' && $com === $prefixe) {
                 $prefixHints[$dept.'|'.$section.'|'.$numeroPlan] = $prefixe;
             }
         }
@@ -1181,20 +1179,27 @@ class DocumentNormalizationService
             $enrichedRows[] = $row;
         }
 
-        $prefixesBySectionNumber = [];
-        $prefixesByDeptSectionNumber = [];
+        $rowsByExactParcelWithoutPrefix = [];
+        $rowsBySectionNumber = [];
+        $prefixesByExactParcelWithoutPrefix = [];
 
         foreach ($enrichedRows as $row) {
             $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
             $prefixe = (string) ($row['prefixe'] ?? '');
             $section = (string) ($row['section'] ?? '');
             $numeroPlan = (string) ($row['numero_plan'] ?? '');
 
-            $sectionNumberKey = $section.'|'.$numeroPlan;
-            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
 
-            $prefixesBySectionNumber[$sectionNumberKey][$prefixe] = true;
-            $prefixesByDeptSectionNumber[$deptSectionNumberKey][$prefixe] = true;
+            $exactWithoutPrefixKey = $dept.'|'.$com.'|'.$section.'|'.$numeroPlan;
+            $sectionNumberKey = $section.'|'.$numeroPlan;
+
+            $rowsByExactParcelWithoutPrefix[$exactWithoutPrefixKey][] = $row;
+            $rowsBySectionNumber[$sectionNumberKey][] = $row;
+            $prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey][$prefixe] = true;
         }
 
         $filtered = [];
@@ -1206,31 +1211,29 @@ class DocumentNormalizationService
             $section = (string) ($row['section'] ?? '');
             $numeroPlan = (string) ($row['numero_plan'] ?? '');
 
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
+
+            $exactWithoutPrefixKey = $dept.'|'.$com.'|'.$section.'|'.$numeroPlan;
             $sectionNumberKey = $section.'|'.$numeroPlan;
-            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+            $contextKey = $dept.'|'.$com;
 
-            $sectionNumberPrefixes = array_keys($prefixesBySectionNumber[$sectionNumberKey] ?? []);
-            $deptSectionNumberPrefixes = array_keys($prefixesByDeptSectionNumber[$deptSectionNumberKey] ?? []);
+            $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
+            $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);
 
-            $hasEmptyForSameSectionNumber = in_array('', $sectionNumberPrefixes, true);
-
-            $hasTrustedPrefixForSameDept = count(array_diff(
-                array_filter($deptSectionNumberPrefixes, static fn (string $candidate): bool => $candidate !== ''),
-                $suspectPrefixes
-            )) > 0;
-
+            // Si la même parcelle existe avec prefixe vide et prefixe non vide sur le même dept/com,
+            // on garde la version vide, sauf si le prefixe a été confirmé par une ligne support.
             if (
                 $prefixe !== ''
-                && in_array($prefixe, $suspectPrefixes, true)
-                && $hasEmptyForSameSectionNumber
+                && $hasExactEmptyVariant
+                && ! isset($prefixHints[$dept.'|'.$section.'|'.$numeroPlan])
             ) {
                 continue;
             }
 
-            if ($prefixe === '' && $hasTrustedPrefixForSameDept) {
-                continue;
-            }
-
+            // Supprimer les lignes support où COM = PREFIXE lorsqu’une meilleure ligne
+            // existe avec le même dept/prefixe/section/numero mais un COM différent.
             if ($prefixe !== '' && $com === $prefixe) {
                 $hasBetterComForSamePrefix = false;
 
@@ -1248,6 +1251,35 @@ class DocumentNormalizationService
                 }
 
                 if ($hasBetterComForSamePrefix) {
+                    continue;
+                }
+            }
+
+            // Supprimer une variante préfixée isolée lorsqu’une variante sans préfixe
+            // existe pour le même section/numero dans un contexte dept/com plus représenté.
+            if ($prefixe !== '') {
+                $currentContextCount = $contextCounts[$contextKey] ?? 0;
+                $hasStrongerEmptyContext = false;
+
+                foreach ($rowsBySectionNumber[$sectionNumberKey] ?? [] as $candidate) {
+                    $candidatePrefixe = (string) ($candidate['prefixe'] ?? '');
+
+                    if ($candidatePrefixe !== '') {
+                        continue;
+                    }
+
+                    $candidateDept = (string) ($candidate['dept'] ?? '');
+                    $candidateCom = (string) ($candidate['com'] ?? '');
+                    $candidateContextKey = $candidateDept.'|'.$candidateCom;
+                    $candidateContextCount = $contextCounts[$candidateContextKey] ?? 0;
+
+                    if ($candidateContextCount > $currentContextCount) {
+                        $hasStrongerEmptyContext = true;
+                        break;
+                    }
+                }
+
+                if ($hasStrongerEmptyContext) {
                     continue;
                 }
             }

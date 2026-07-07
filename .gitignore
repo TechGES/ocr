@@ -3,3 +3,10 @@
 .idea/
 .phpunit.cache/
 vendor/
+
+# Local OCR audit fixtures / confidential client files
+/OCR-0.3.6/
+/storage/
+/test_ocr.php
+/bootstrap/
+/lot*.txt

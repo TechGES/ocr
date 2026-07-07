@@ -550,6 +550,7 @@ class DocumentNormalizationService
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
         $rows = $this->normalizeMsaIsolatedContextOutliers($rows);
         $rows = $this->normalizeSuspiciousMsaPrefixes($rows);
+        $rows = $this->normalizeMsaPrefixConflicts($rows);
         $rows = $this->normalizeSuspiciousTruncatedMsaPlanNumbers($rows);
 
         return [
@@ -1114,6 +1115,156 @@ class DocumentNormalizationService
 
             return $row;
         }, $rows);
+    }
+
+    /**
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaPrefixConflicts(array $rows): array
+    {
+        $suspectPrefixes = ['001', '011', '048', '064', '102'];
+        $normalizedRows = [];
+
+        foreach ($rows as $row) {
+            if (($row['prefixe'] ?? '') === '000') {
+                $row['prefixe'] = '';
+            }
+
+            $normalizedRows[] = $row;
+        }
+
+        $prefixHints = [];
+
+        foreach ($normalizedRows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if (
+                $dept === ''
+                || $com === ''
+                || $prefixe === ''
+                || $section === ''
+                || $numeroPlan === ''
+                || in_array($prefixe, $suspectPrefixes, true)
+            ) {
+                continue;
+            }
+
+            if ($com === $prefixe) {
+                $prefixHints[$dept.'|'.$section.'|'.$numeroPlan] = $prefixe;
+            }
+        }
+
+        $enrichedRows = [];
+
+        foreach ($normalizedRows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            $hintKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+            if (
+                $prefixe === ''
+                && isset($prefixHints[$hintKey])
+                && $com !== $prefixHints[$hintKey]
+            ) {
+                $row['prefixe'] = $prefixHints[$hintKey];
+            }
+
+            $enrichedRows[] = $row;
+        }
+
+        $prefixesBySectionNumber = [];
+        $prefixesByDeptSectionNumber = [];
+
+        foreach ($enrichedRows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            $sectionNumberKey = $section.'|'.$numeroPlan;
+            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+            $prefixesBySectionNumber[$sectionNumberKey][$prefixe] = true;
+            $prefixesByDeptSectionNumber[$deptSectionNumberKey][$prefixe] = true;
+        }
+
+        $filtered = [];
+
+        foreach ($enrichedRows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            $sectionNumberKey = $section.'|'.$numeroPlan;
+            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+            $sectionNumberPrefixes = array_keys($prefixesBySectionNumber[$sectionNumberKey] ?? []);
+            $deptSectionNumberPrefixes = array_keys($prefixesByDeptSectionNumber[$deptSectionNumberKey] ?? []);
+
+            $hasEmptyForSameSectionNumber = in_array('', $sectionNumberPrefixes, true);
+
+            $hasTrustedPrefixForSameDept = count(array_diff(
+                array_filter($deptSectionNumberPrefixes, static fn (string $candidate): bool => $candidate !== ''),
+                $suspectPrefixes
+            )) > 0;
+
+            if (
+                $prefixe !== ''
+                && in_array($prefixe, $suspectPrefixes, true)
+                && $hasEmptyForSameSectionNumber
+            ) {
+                continue;
+            }
+
+            if ($prefixe === '' && $hasTrustedPrefixForSameDept) {
+                continue;
+            }
+
+            if ($prefixe !== '' && $com === $prefixe) {
+                $hasBetterComForSamePrefix = false;
+
+                foreach ($enrichedRows as $candidate) {
+                    if (
+                        (string) ($candidate['dept'] ?? '') === $dept
+                        && (string) ($candidate['prefixe'] ?? '') === $prefixe
+                        && (string) ($candidate['section'] ?? '') === $section
+                        && (string) ($candidate['numero_plan'] ?? '') === $numeroPlan
+                        && (string) ($candidate['com'] ?? '') !== $com
+                    ) {
+                        $hasBetterComForSamePrefix = true;
+                        break;
+                    }
+                }
+
+                if ($hasBetterComForSamePrefix) {
+                    continue;
+                }
+            }
+
+            $dedupeKey = implode('|', [
+                $dept,
+                $com,
+                $prefixe,
+                $section,
+                $numeroPlan,
+            ]);
+
+            $row['prefixe'] = $prefixe;
+            $filtered[$dedupeKey] = $row;
+        }
+
+        return array_values($filtered);
     }
 
     private function normalizeMsaSection(string $value): string

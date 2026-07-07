@@ -58,7 +58,167 @@ class OpenAiDocumentAnalyzer
             $merged[] = $parcel;
         }
 
-        return $merged;
+        return $this->removeConflictingMsaPrefixes($merged, $textParcels);
+    }
+
+    /**
+     * @param  array<int, mixed>  $parcels
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
+     * @return array<int, mixed>
+     */
+    private function removeConflictingMsaPrefixes(array $parcels, array $textParcels = []): array
+    {
+        $suspectPrefixes = ['001', '011', '048', '064', '102'];
+
+        $normalizedParcels = [];
+
+        foreach ($parcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+            $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
+            $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
+            $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
+
+            if ($prefixe === '000') {
+                $prefixe = '';
+            }
+
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
+
+            $normalizedParcels[] = [
+                'dept' => $dept,
+                'com' => $com,
+                'prefixe' => $prefixe,
+                'section' => $section,
+                'numero_plan' => $numeroPlan,
+            ];
+        }
+
+        $prefixHints = [];
+
+        foreach ($normalizedParcels as $parcel) {
+            $dept = $parcel['dept'];
+            $com = $parcel['com'];
+            $prefixe = $parcel['prefixe'];
+            $section = $parcel['section'];
+            $numeroPlan = $parcel['numero_plan'];
+
+            // Cas MSA fréquent : le prefixe est lu, mais aussi utilisé à tort comme COM.
+            // Exemple: 85 224 224 0G 0949 est une ligne support pour 85 146 224 0G 0949.
+            if ($prefixe !== '' && ! in_array($prefixe, $suspectPrefixes, true) && $com === $prefixe) {
+                $prefixHints[$dept.'|'.$section.'|'.$numeroPlan] = $prefixe;
+            }
+        }
+
+        $enriched = [];
+
+        foreach ($normalizedParcels as $parcel) {
+            $hintKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                $parcel['prefixe'] === ''
+                && isset($prefixHints[$hintKey])
+                && $parcel['com'] !== $prefixHints[$hintKey]
+            ) {
+                $parcel['prefixe'] = $prefixHints[$hintKey];
+            }
+
+            $enriched[] = $parcel;
+        }
+
+        $prefixesBySectionNumber = [];
+        $prefixesByDeptSectionNumber = [];
+
+        foreach ($enriched as $parcel) {
+            $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
+            $deptSectionNumberKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            $prefixesBySectionNumber[$sectionNumberKey][$parcel['prefixe']] = true;
+            $prefixesByDeptSectionNumber[$deptSectionNumberKey][$parcel['prefixe']] = true;
+        }
+
+        $filtered = [];
+
+        foreach ($enriched as $parcel) {
+            $dept = $parcel['dept'];
+            $com = $parcel['com'];
+            $prefixe = $parcel['prefixe'];
+            $section = $parcel['section'];
+            $numeroPlan = $parcel['numero_plan'];
+
+            $sectionNumberKey = $section.'|'.$numeroPlan;
+            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+            $sectionNumberPrefixes = array_keys($prefixesBySectionNumber[$sectionNumberKey] ?? []);
+            $deptSectionNumberPrefixes = array_keys($prefixesByDeptSectionNumber[$deptSectionNumberKey] ?? []);
+
+            $hasEmptyForSameSectionNumber = in_array('', $sectionNumberPrefixes, true);
+            $hasTrustedPrefixForSameDept = count(array_diff(
+                array_filter($deptSectionNumberPrefixes, fn (string $candidate): bool => $candidate !== ''),
+                $suspectPrefixes
+            )) > 0;
+
+            // Cas 1 : si une même section/numéro existe avec prefixe vide,
+            // les préfixes propriétaires connus comme suspects sont écartés,
+            // même si dept/com diffèrent.
+            // Exemple: garder 85/216/ZB0034 et écarter 11/262/102/ZB0034.
+            if (
+                $prefixe !== ''
+                && in_array($prefixe, $suspectPrefixes, true)
+                && $hasEmptyForSameSectionNumber
+            ) {
+                continue;
+            }
+
+            // Cas 2 : si le même dept + section + numéro existe avec un vrai prefixe cadastral,
+            // on écarte la variante sans prefixe.
+            // Exemple: garder 85/146/224/0G0949 plutôt que 85/146/vide/0G0949.
+            if ($prefixe === '' && $hasTrustedPrefixForSameDept) {
+                continue;
+            }
+
+            // Cas 3 : écarter les lignes support où COM = PREFIXE
+            // si une meilleure ligne existe avec le même dept/prefixe/section/numéro mais un autre COM.
+            // Exemple: écarter 85/224/224/0G0949 si 85/146/224/0G0949 existe.
+            if ($prefixe !== '' && $com === $prefixe) {
+                $hasBetterComForSamePrefix = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $dept
+                        && $candidate['prefixe'] === $prefixe
+                        && $candidate['section'] === $section
+                        && $candidate['numero_plan'] === $numeroPlan
+                        && $candidate['com'] !== $com
+                    ) {
+                        $hasBetterComForSamePrefix = true;
+                        break;
+                    }
+                }
+
+                if ($hasBetterComForSamePrefix) {
+                    continue;
+                }
+            }
+
+            $dedupeKey = implode('|', [
+                $dept,
+                $com,
+                $prefixe,
+                $section,
+                $numeroPlan,
+            ]);
+
+            $filtered[$dedupeKey] = $parcel;
+        }
+
+        return array_values($filtered);
     }
 
     private function detectMsaDocumentDept(string $text): string
@@ -89,6 +249,7 @@ class OpenAiDocumentAnalyzer
 
         $lastDept = '';
         $lastCom = '';
+        $lastPrefixe = '';
         $parcels = [];
 
         foreach ($lines as $index => $line) {
@@ -105,27 +266,44 @@ class OpenAiDocumentAnalyzer
             if (preg_match('/^(\d{2})\s+(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1 && $lastDept !== '') {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
-            preg_match_all(
-                '/(?<![A-Z0-9])([A-HM-Z]|Z[A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
-                $line,
-                $matches,
-                PREG_SET_ORDER
-            );
+            $tokens = preg_split('/\s+/u', $line) ?: [];
 
-            if ($this->hasContradictoryMsaTextCandidates($matches)) {
-                continue;
-            }
+            foreach ($tokens as $tokenIndex => $token) {
+                $nextToken = $tokens[$tokenIndex + 1] ?? '';
 
-            foreach ($matches as $match) {
-                $section = $this->normalizeMsaTextSection($match[1]);
-                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
+                if ($nextToken === '') {
+                    continue;
+                }
+
+                if (preg_match('/^\d{5,}$/', $nextToken) === 1) {
+                    continue;
+                }
+
+                $section = $this->normalizeMsaTextSection($token);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($nextToken);
 
                 if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
                     continue;
+                }
+
+                $prefixe = '';
+                $previousToken = $tokens[$tokenIndex - 1] ?? '';
+
+                if (
+                    preg_match('/^\d{3}$/', $previousToken) === 1
+                    && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
+                ) {
+                    $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
+                } elseif ($lastPrefixe !== '') {
+                    $prefixe = $lastPrefixe;
+                }
+
+                if ($prefixe !== '') {
+                    $lastPrefixe = $prefixe;
                 }
 
                 [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine($lines, $index, $lastDept, $lastCom);
@@ -133,7 +311,7 @@ class OpenAiDocumentAnalyzer
                 $parcels[] = [
                     'dept' => $contextDept,
                     'com' => $contextCom,
-                    'prefixe' => '',
+                    'prefixe' => $prefixe,
                     'section' => $section,
                     'numero_plan' => $numeroPlan,
                 ];
@@ -257,6 +435,28 @@ class OpenAiDocumentAnalyzer
         return [$lastDept, $lastCom];
     }
 
+    /**
+     * @param array<int, string> $tokens
+     */
+    private function isMsaTextComToken(array $tokens, int $tokenIndex): bool
+    {
+        $token = $tokens[$tokenIndex] ?? '';
+
+        if (preg_match('/^\d{3}$/', $token) !== 1) {
+            return false;
+        }
+
+        if ($tokenIndex === 1 && preg_match('/^\d{2}$/', $tokens[0] ?? '') === 1) {
+            return true;
+        }
+
+        if ($tokenIndex === 0 && preg_match('/^[A-Z]$/', $tokens[1] ?? '') === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
     private function normalizeMsaTextLine(string $line): string
     {
         $line = mb_strtoupper($line);
@@ -284,8 +484,8 @@ class OpenAiDocumentAnalyzer
     {
         $raw = mb_strtoupper(trim($value));
 
-        if (str_starts_with($raw, '0')) {
-            return '';
+        if (preg_match('/^0([A-Z])$/', $raw, $matches) === 1) {
+            return '0'.$matches[1];
         }
 
         $section = strtr($raw, [

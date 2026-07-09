@@ -90,7 +90,6 @@ class DocumentExtractor
         $lines = preg_split('/\R+/u', $text) ?: [];
         $lastDept = '';
         $lastCom = '';
-        $lastPrefixe = '';
         $parcels = [];
 
         foreach ($lines as $line) {
@@ -165,12 +164,6 @@ class DocumentExtractor
                     && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
                 ) {
                     $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
-                } elseif ($lastPrefixe !== '') {
-                    $prefixe = $lastPrefixe;
-                }
-
-                if ($prefixe !== '') {
-                    $lastPrefixe = $prefixe;
                 }
 
                 $parcels[] = [

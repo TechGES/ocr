@@ -125,6 +125,83 @@ class OpenAiDocumentAnalyzer
             $enriched[] = $parcel;
         }
 
+        $contextPrefixCounts = [];
+        $sectionPrefixCounts = [];
+
+        foreach ($enriched as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+
+            if ($dept === '' || $com === '' || $prefixe === '') {
+                continue;
+            }
+
+            $contextKey = $dept.'|'.$com;
+            $contextPrefixCounts[$contextKey][$prefixe] = ($contextPrefixCounts[$contextKey][$prefixe] ?? 0) + 1;
+
+            if ($section !== '') {
+                $sectionKey = $dept.'|'.$com.'|'.$section;
+                $sectionPrefixCounts[$sectionKey][$prefixe] = ($sectionPrefixCounts[$sectionKey][$prefixe] ?? 0) + 1;
+            }
+        }
+
+        $trustedPrefixByContext = [];
+
+        foreach ($contextPrefixCounts as $contextKey => $prefixCounts) {
+            if (count($prefixCounts) !== 1) {
+                continue;
+            }
+
+            $prefixe = array_key_first($prefixCounts);
+            $count = $prefixCounts[$prefixe] ?? 0;
+
+            // Un prefixe présent plusieurs fois dans le même dept/com est considéré fiable.
+            // Exemple: 49|018 porte de nombreuses lignes prefixe=245.
+            if ($prefixe !== null && $count >= 2) {
+                $trustedPrefixByContext[$contextKey] = (string) $prefixe;
+            }
+        }
+
+        $trustedPrefixBySection = [];
+
+        foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
+            if (count($prefixCounts) !== 1) {
+                continue;
+            }
+
+            $prefixe = array_key_first($prefixCounts);
+            $count = $prefixCounts[$prefixe] ?? 0;
+
+            if ($prefixe !== null && $count >= 2) {
+                $trustedPrefixBySection[$sectionKey] = (string) $prefixe;
+            }
+        }
+
+        foreach ($enriched as $index => $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+
+            if ($prefixe !== '') {
+                continue;
+            }
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $contextKey = $dept.'|'.$com;
+
+            if (isset($trustedPrefixBySection[$sectionKey])) {
+                $enriched[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
+                continue;
+            }
+
+            if (isset($trustedPrefixByContext[$contextKey])) {
+                $enriched[$index]['prefixe'] = $trustedPrefixByContext[$contextKey];
+            }
+        }
+
         $prefixesByExactParcelWithoutPrefix = [];
         $rowsBySectionNumber = [];
 
@@ -198,6 +275,53 @@ class OpenAiDocumentAnalyzer
                 }
             }
 
+            $hintKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                isset($prefixHints[$hintKey])
+                && $parcel['com'] === $prefixHints[$hintKey]
+            ) {
+                $hasBetterComForHint = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['com'] !== $parcel['com']
+                        && $candidate['prefixe'] === $prefixHints[$hintKey]
+                    ) {
+                        $hasBetterComForHint = true;
+                        break;
+                    }
+                }
+
+                if ($hasBetterComForHint) {
+                    continue;
+                }
+            }
+
+            if ($parcel['prefixe'] === '') {
+                $hasPrefixedCandidateUsingCurrentComAsPrefix = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['prefixe'] === $parcel['com']
+                        && $candidate['com'] !== $parcel['com']
+                    ) {
+                        $hasPrefixedCandidateUsingCurrentComAsPrefix = true;
+                        break;
+                    }
+                }
+
+                if ($hasPrefixedCandidateUsingCurrentComAsPrefix) {
+                    continue;
+                }
+            }
+
             $dedupeKey = implode('|', [
                 $parcel['dept'],
                 $parcel['com'],
@@ -240,7 +364,6 @@ class OpenAiDocumentAnalyzer
 
         $lastDept = '';
         $lastCom = '';
-        $lastPrefixe = '';
         $parcels = [];
 
         foreach ($lines as $index => $line) {
@@ -289,12 +412,6 @@ class OpenAiDocumentAnalyzer
                     && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
                 ) {
                     $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
-                } elseif ($lastPrefixe !== '') {
-                    $prefixe = $lastPrefixe;
-                }
-
-                if ($prefixe !== '') {
-                    $lastPrefixe = $prefixe;
                 }
 
                 [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine($lines, $index, $lastDept, $lastCom);

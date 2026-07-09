@@ -1208,8 +1208,8 @@ class DocumentNormalizationService
             $enrichedRows[] = $row;
         }
 
-        $contextPrefixCounts = [];
         $sectionPrefixCounts = [];
+        $sectionHasEmptyPrefix = [];
 
         foreach ($enrichedRows as $row) {
             $dept = (string) ($row['dept'] ?? '');
@@ -1217,33 +1217,55 @@ class DocumentNormalizationService
             $prefixe = (string) ($row['prefixe'] ?? '');
             $section = (string) ($row['section'] ?? '');
 
-            if ($dept === '' || $com === '' || $prefixe === '') {
+            if ($dept === '' || $com === '' || $section === '') {
                 continue;
             }
 
-            $contextKey = $dept.'|'.$com;
-            $contextPrefixCounts[$contextKey][$prefixe] = ($contextPrefixCounts[$contextKey][$prefixe] ?? 0) + 1;
+            $sectionKey = $dept.'|'.$com.'|'.$section;
 
-            if ($section !== '') {
-                $sectionKey = $dept.'|'.$com.'|'.$section;
-                $sectionPrefixCounts[$sectionKey][$prefixe] = ($sectionPrefixCounts[$sectionKey][$prefixe] ?? 0) + 1;
+            if ($prefixe === '') {
+                $sectionHasEmptyPrefix[$sectionKey] = true;
+                continue;
             }
+
+            $sectionPrefixCounts[$sectionKey][$prefixe] = ($sectionPrefixCounts[$sectionKey][$prefixe] ?? 0) + 1;
         }
 
-        $trustedPrefixByContext = [];
+        $trustedPrefixBySection = [];
 
-        foreach ($contextPrefixCounts as $contextKey => $prefixCounts) {
+        foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
             if (count($prefixCounts) !== 1) {
+                continue;
+            }
+
+            if (isset($sectionHasEmptyPrefix[$sectionKey])) {
                 continue;
             }
 
             $prefixe = array_key_first($prefixCounts);
             $count = $prefixCounts[$prefixe] ?? 0;
 
-            // Un prefixe présent plusieurs fois dans le même dept/com est considéré fiable.
-            // Exemple: 49|018 porte de nombreuses lignes prefixe=245.
+            // Propagation prudente : seulement si le prefixe est confirmé
+            // plusieurs fois dans le même dept + com + section.
             if ($prefixe !== null && $count >= 2) {
-                $trustedPrefixByContext[$contextKey] = (string) $prefixe;
+                $trustedPrefixBySection[$sectionKey] = (string) $prefixe;
+            }
+        }
+
+        foreach ($enrichedRows as $index => $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+
+            if ($prefixe !== '') {
+                continue;
+            }
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+
+            if (isset($trustedPrefixBySection[$sectionKey])) {
+                $enrichedRows[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
             }
         }
 
@@ -1251,6 +1273,10 @@ class DocumentNormalizationService
 
         foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
             if (count($prefixCounts) !== 1) {
+                continue;
+            }
+
+            if (isset($sectionHasEmptyPrefix[$sectionKey])) {
                 continue;
             }
 
@@ -1279,10 +1305,6 @@ class DocumentNormalizationService
                 $enrichedRows[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
                 continue;
             }
-
-            if (isset($trustedPrefixByContext[$contextKey])) {
-                $enrichedRows[$index]['prefixe'] = $trustedPrefixByContext[$contextKey];
-            }
         }
 
         $rowsByExactParcelWithoutPrefix = [];
@@ -1308,6 +1330,62 @@ class DocumentNormalizationService
             $prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey][$prefixe] = true;
         }
 
+        $supportPrefixByDeptSectionNumber = [];
+
+        foreach ($enrichedRows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if ($dept === '' || $com === '' || $prefixe === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
+
+            if ($com === $prefixe) {
+                $supportPrefixByDeptSectionNumber[$dept.'|'.$section.'|'.$numeroPlan][$prefixe] = true;
+            }
+        }
+
+        $preferredPrefixByExactParcel = [];
+
+        foreach ($prefixesByExactParcelWithoutPrefix as $exactWithoutPrefixKey => $prefixes) {
+            $availablePrefixes = array_keys($prefixes);
+
+            if (in_array('', $availablePrefixes, true)) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                continue;
+            }
+
+            if (count($availablePrefixes) <= 1) {
+                continue;
+            }
+
+            [$dept, $com, $section, $numeroPlan] = explode('|', $exactWithoutPrefixKey);
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $bestPrefix = null;
+            $bestCount = -1;
+
+            foreach ($availablePrefixes as $candidatePrefix) {
+                if ($candidatePrefix === '') {
+                    continue;
+                }
+
+                $count = $sectionPrefixCounts[$sectionKey][$candidatePrefix] ?? 0;
+
+                if ($count > $bestCount) {
+                    $bestPrefix = $candidatePrefix;
+                    $bestCount = $count;
+                }
+            }
+
+            if ($bestPrefix !== null) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = $bestPrefix;
+            }
+        }
+
         $filtered = [];
 
         foreach ($enrichedRows as $row) {
@@ -1322,8 +1400,52 @@ class DocumentNormalizationService
             }
 
             $exactWithoutPrefixKey = $dept.'|'.$com.'|'.$section.'|'.$numeroPlan;
+
+            if (
+                isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+                && $prefixe !== $preferredPrefixByExactParcel[$exactWithoutPrefixKey]
+            ) {
+                continue;
+            }
+
             $sectionNumberKey = $section.'|'.$numeroPlan;
             $contextKey = $dept.'|'.$com;
+
+            $deptSectionNumberKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+            if (
+                $prefixe !== ''
+                && isset($supportPrefixByDeptSectionNumber[$deptSectionNumberKey][$prefixe])
+                && $com !== $prefixe
+            ) {
+                $row['prefixe'] = '';
+                $prefixe = '';
+            }
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$prefixe] ?? 0;
+            $contextEmptyPrefixCount = 0;
+
+            foreach ($enrichedRows as $candidate) {
+                if (
+                    (string) ($candidate['dept'] ?? '') === $dept
+                    && (string) ($candidate['com'] ?? '') === $com
+                    && (string) ($candidate['prefixe'] ?? '') === ''
+                ) {
+                    $contextEmptyPrefixCount++;
+                }
+            }
+
+            if (
+                $prefixe !== ''
+                && $sectionPrefixCount <= 2
+                && $contextEmptyPrefixCount >= 3
+                && ! isset($prefixHints[$dept.'|'.$section.'|'.$numeroPlan])
+                && ! isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+            ) {
+                $row['prefixe'] = '';
+                $prefixe = '';
+            }
 
             $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
             $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);

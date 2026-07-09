@@ -125,31 +125,27 @@ class OpenAiDocumentAnalyzer
             $enriched[] = $parcel;
         }
 
-        $contextPrefixCounts = [];
         $sectionPrefixCounts = [];
+        $sectionHasEmptyPrefix = [];
 
-        foreach ($enriched as $row) {
-            $dept = (string) ($row['dept'] ?? '');
-            $com = (string) ($row['com'] ?? '');
-            $prefixe = (string) ($row['prefixe'] ?? '');
-            $section = (string) ($row['section'] ?? '');
+        foreach ($enriched as $parcel) {
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
 
-            if ($dept === '' || $com === '' || $prefixe === '') {
+            if ($parcel['prefixe'] === '') {
+                $sectionHasEmptyPrefix[$sectionKey] = true;
                 continue;
             }
 
-            $contextKey = $dept.'|'.$com;
-            $contextPrefixCounts[$contextKey][$prefixe] = ($contextPrefixCounts[$contextKey][$prefixe] ?? 0) + 1;
-
-            if ($section !== '') {
-                $sectionKey = $dept.'|'.$com.'|'.$section;
-                $sectionPrefixCounts[$sectionKey][$prefixe] = ($sectionPrefixCounts[$sectionKey][$prefixe] ?? 0) + 1;
-            }
+            $sectionPrefixCounts[$sectionKey][$parcel['prefixe']] = ($sectionPrefixCounts[$sectionKey][$parcel['prefixe']] ?? 0) + 1;
         }
 
-        $trustedPrefixByContext = [];
+        $trustedPrefixBySection = [];
 
-        foreach ($contextPrefixCounts as $contextKey => $prefixCounts) {
+        foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
+            if (isset($sectionHasEmptyPrefix[$sectionKey])) {
+                continue;
+            }
+
             if (count($prefixCounts) !== 1) {
                 continue;
             }
@@ -157,10 +153,20 @@ class OpenAiDocumentAnalyzer
             $prefixe = array_key_first($prefixCounts);
             $count = $prefixCounts[$prefixe] ?? 0;
 
-            // Un prefixe présent plusieurs fois dans le même dept/com est considéré fiable.
-            // Exemple: 49|018 porte de nombreuses lignes prefixe=245.
             if ($prefixe !== null && $count >= 2) {
-                $trustedPrefixByContext[$contextKey] = (string) $prefixe;
+                $trustedPrefixBySection[$sectionKey] = (string) $prefixe;
+            }
+        }
+
+        foreach ($enriched as $index => $parcel) {
+            if ($parcel['prefixe'] !== '') {
+                continue;
+            }
+
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
+
+            if (isset($trustedPrefixBySection[$sectionKey])) {
+                $enriched[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
             }
         }
 
@@ -168,6 +174,10 @@ class OpenAiDocumentAnalyzer
 
         foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
             if (count($prefixCounts) !== 1) {
+                if (isset($sectionHasEmptyPrefix[$sectionKey])) {
+                    continue;
+                }
+
                 continue;
             }
 
@@ -196,10 +206,6 @@ class OpenAiDocumentAnalyzer
                 $enriched[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
                 continue;
             }
-
-            if (isset($trustedPrefixByContext[$contextKey])) {
-                $enriched[$index]['prefixe'] = $trustedPrefixByContext[$contextKey];
-            }
         }
 
         $prefixesByExactParcelWithoutPrefix = [];
@@ -213,12 +219,104 @@ class OpenAiDocumentAnalyzer
             $rowsBySectionNumber[$sectionNumberKey][] = $parcel;
         }
 
+        $supportPrefixByDeptSectionNumber = [];
+
+        foreach ($enriched as $parcel) {
+            if ($parcel['prefixe'] === '') {
+                continue;
+            }
+
+            if ($parcel['com'] === $parcel['prefixe']) {
+                $supportPrefixByDeptSectionNumber[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']][$parcel['prefixe']] = true;
+            }
+        }
+
+        $preferredPrefixByExactParcel = [];
+
+        foreach ($prefixesByExactParcelWithoutPrefix as $exactWithoutPrefixKey => $prefixes) {
+            $availablePrefixes = array_keys($prefixes);
+
+            if (in_array('', $availablePrefixes, true)) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                continue;
+            }
+
+            if (count($availablePrefixes) <= 1) {
+                continue;
+            }
+
+            [$dept, $com, $section, $numeroPlan] = explode('|', $exactWithoutPrefixKey);
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $bestPrefix = null;
+            $bestCount = -1;
+
+            foreach ($availablePrefixes as $candidatePrefix) {
+                if ($candidatePrefix === '') {
+                    continue;
+                }
+
+                $count = $sectionPrefixCounts[$sectionKey][$candidatePrefix] ?? 0;
+
+                if ($count > $bestCount) {
+                    $bestPrefix = $candidatePrefix;
+                    $bestCount = $count;
+                }
+            }
+
+            if ($bestPrefix !== null) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = $bestPrefix;
+            }
+        }
+
         $filtered = [];
 
         foreach ($enriched as $parcel) {
             $exactWithoutPrefixKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+                && $parcel['prefixe'] !== $preferredPrefixByExactParcel[$exactWithoutPrefixKey]
+            ) {
+                continue;
+            }
+
             $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
             $contextKey = $parcel['dept'].'|'.$parcel['com'];
+
+            $deptSectionNumberKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                $parcel['prefixe'] !== ''
+                && isset($supportPrefixByDeptSectionNumber[$deptSectionNumberKey][$parcel['prefixe']])
+                && $parcel['com'] !== $parcel['prefixe']
+            ) {
+                $parcel['prefixe'] = '';
+            }
+
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
+            $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$parcel['prefixe']] ?? 0;
+            $contextEmptyPrefixCount = 0;
+
+            foreach ($enriched as $candidate) {
+                if (
+                    $candidate['dept'] === $parcel['dept']
+                    && $candidate['com'] === $parcel['com']
+                    && $candidate['prefixe'] === ''
+                ) {
+                    $contextEmptyPrefixCount++;
+                }
+            }
+
+            if (
+                $parcel['prefixe'] !== ''
+                && $sectionPrefixCount <= 2
+                && $contextEmptyPrefixCount >= 3
+                && ! isset($prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']])
+                && ! isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+            ) {
+                $parcel['prefixe'] = '';
+            }
 
             $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
             $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);

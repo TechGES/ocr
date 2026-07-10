@@ -128,7 +128,7 @@ class DocumentExtractor
             if (preg_match('/^(\d{2})\s+(\d{3})\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
@@ -138,6 +138,10 @@ class DocumentExtractor
                 $nextToken = $tokens[$tokenIndex + 1] ?? '';
 
                 if ($nextToken === '') {
+                    continue;
+                }
+
+                if (! $this->looksLikeMsaTextSectionToken($token)) {
                     continue;
                 }
 
@@ -275,6 +279,41 @@ class DocumentExtractor
         }
 
         return str_pad($digits, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function looksLikeMsaTextSectionToken(string $token): bool
+    {
+        $normalized = mb_strtoupper(trim($token));
+
+        $normalized = strtr($normalized, [
+            'É' => 'E',
+            'È' => 'E',
+            'Ê' => 'E',
+            'Ë' => 'E',
+            'À' => 'A',
+            'Â' => 'A',
+            'Î' => 'I',
+            'Ï' => 'I',
+            'Ô' => 'O',
+            'Û' => 'U',
+            'Ù' => 'U',
+            'Ç' => 'C',
+        ]);
+
+        $normalized = preg_replace('/[^A-Z0-9]/u', '', $normalized) ?? $normalized;
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        // Une section MSA doit contenir au moins une lettre visible.
+        // Évite les faux positifs comme "72 294" => 0Z/0294
+        // ou "03 P" => OO/0003.
+        if (preg_match('/[A-Z]/u', $normalized) !== 1) {
+            return false;
+        }
+
+        return true;
     }
 
     private function looksLikeMsaOwnerAccount(string $line, string $section, string $numeroPlan): bool

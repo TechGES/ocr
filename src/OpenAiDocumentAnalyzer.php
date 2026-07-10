@@ -491,6 +491,10 @@ class OpenAiDocumentAnalyzer
                     continue;
                 }
 
+                if (! $this->looksLikeMsaTextSectionToken($token)) {
+                    continue;
+                }
+
                 if (preg_match('/^\d{5,}$/', $nextToken) === 1) {
                     continue;
                 }
@@ -932,6 +936,34 @@ class OpenAiDocumentAnalyzer
         $parcel['numero_plan'] = $numeroPlan;
 
         return $parcel;
+    }
+
+    private function looksLikeMsaTextSectionToken(string $token): bool
+    {
+        $normalized = mb_strtoupper(trim($token));
+
+        $normalized = strtr($normalized, [
+            'É' => 'E',
+            'È' => 'E',
+            'Ê' => 'E',
+            'Ë' => 'E',
+            'À' => 'A',
+            'Â' => 'A',
+            'Î' => 'I',
+            'Ï' => 'I',
+            'Ô' => 'O',
+            'Û' => 'U',
+            'Ù' => 'U',
+            'Ç' => 'C',
+        ]);
+
+        $normalized = preg_replace('/[^A-Z0-9]/u', '', $normalized) ?? $normalized;
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return preg_match('/[A-Z]/u', $normalized) === 1;
     }
 
     /**

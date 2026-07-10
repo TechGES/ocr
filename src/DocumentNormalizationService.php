@@ -1013,10 +1013,6 @@ class DocumentNormalizationService
      */
     private function normalizeSuspiciousMsaPrefixes(array $rows): array
     {
-        if (count($rows) < 5) {
-            return $rows;
-        }
-
         $prefixCounts = [];
 
         foreach ($rows as $row) {
@@ -1152,6 +1148,10 @@ class DocumentNormalizationService
      */
     private function normalizeMsaPrefixConflicts(array $rows): array
     {
+        if (count($rows) < 5) {
+            return $rows;
+        }
+
         $normalizedRows = [];
 
         foreach ($rows as $row) {

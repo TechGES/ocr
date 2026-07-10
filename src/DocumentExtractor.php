@@ -107,7 +107,6 @@ class DocumentExtractor
                 'Û' => 'U',
                 'Ù' => 'U',
                 'Ç' => 'C',
-                'Ê' => 'E',
                 '0O' => '00',
                 'O0' => '00',
                 'OO' => '00',
@@ -129,30 +128,31 @@ class DocumentExtractor
             if (preg_match('/^(\d{2})\s+(\d{3})\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
-            preg_match_all(
-                '/(?<![A-Z0-9])([Z2][A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
-                $line,
-                $matches,
-                PREG_SET_ORDER
-            );
+            $tokens = preg_split('/\s+/u', $line) ?: [];
 
-            if ($this->hasContradictoryMsaTextCandidates($matches)) {
-                continue;
-            }
+            foreach ($tokens as $tokenIndex => $token) {
+                $nextToken = $tokens[$tokenIndex + 1] ?? '';
 
-            foreach ($matches as $match) {
-                $section = $this->normalizeMsaTextSection($match[1]);
-                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
-
-                if ($section === '' || $numeroPlan === '') {
+                if ($nextToken === '') {
                     continue;
                 }
 
-                if ($numeroPlan === '0000') {
+                if (! $this->looksLikeMsaTextSectionToken($token)) {
+                    continue;
+                }
+
+                if (preg_match('/^\d{5,}$/', $nextToken) === 1) {
+                    continue;
+                }
+
+                $section = $this->normalizeMsaTextSection($token);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($nextToken);
+
+                if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
                     continue;
                 }
 
@@ -160,10 +160,20 @@ class DocumentExtractor
                     continue;
                 }
 
+                $prefixe = '';
+                $previousToken = $tokens[$tokenIndex - 1] ?? '';
+
+                if (
+                    preg_match('/^\d{3}$/', $previousToken) === 1
+                    && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
+                ) {
+                    $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
+                }
+
                 $parcels[] = [
                     'dept' => $lastDept,
                     'com' => $lastCom,
-                    'prefixe' => '',
+                    'prefixe' => $prefixe,
                     'section' => $section,
                     'numero_plan' => $numeroPlan,
                 ];
@@ -194,14 +204,42 @@ class DocumentExtractor
         return count(array_unique($normalizedCandidates)) > 1;
     }
 
+    /**
+     * @param array<int, string> $tokens
+     */
+    private function isMsaTextComToken(array $tokens, int $tokenIndex): bool
+    {
+        $token = $tokens[$tokenIndex] ?? '';
+
+        if (preg_match('/^\d{3}$/', $token) !== 1) {
+            return false;
+        }
+
+        if ($tokenIndex === 1 && preg_match('/^\d{2}$/', $tokens[0] ?? '') === 1) {
+            return true;
+        }
+
+        if ($tokenIndex === 0 && preg_match('/^[A-Z]$/', $tokens[1] ?? '') === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
     private function normalizeMsaTextSection(string $value): string
     {
-        $section = mb_strtoupper(trim($value));
-        $section = strtr($section, [
+        $raw = mb_strtoupper(trim($value));
+
+        if (preg_match('/^0([A-Z])$/', $raw, $matches) === 1) {
+            return '0'.$matches[1];
+        }
+
+        $section = strtr($raw, [
             '0' => 'O',
             '1' => 'I',
             '2' => 'Z',
         ]);
+
         $section = preg_replace('/[^A-Z]/u', '', $section) ?? '';
 
         if ($section === '') {
@@ -241,6 +279,41 @@ class DocumentExtractor
         }
 
         return str_pad($digits, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function looksLikeMsaTextSectionToken(string $token): bool
+    {
+        $normalized = mb_strtoupper(trim($token));
+
+        $normalized = strtr($normalized, [
+            'É' => 'E',
+            'È' => 'E',
+            'Ê' => 'E',
+            'Ë' => 'E',
+            'À' => 'A',
+            'Â' => 'A',
+            'Î' => 'I',
+            'Ï' => 'I',
+            'Ô' => 'O',
+            'Û' => 'U',
+            'Ù' => 'U',
+            'Ç' => 'C',
+        ]);
+
+        $normalized = preg_replace('/[^A-Z0-9]/u', '', $normalized) ?? $normalized;
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        // Une section MSA doit contenir au moins une lettre visible.
+        // Évite les faux positifs comme "72 294" => 0Z/0294
+        // ou "03 P" => OO/0003.
+        if (preg_match('/[A-Z]/u', $normalized) !== 1) {
+            return false;
+        }
+
+        return true;
     }
 
     private function looksLikeMsaOwnerAccount(string $line, string $section, string $numeroPlan): bool

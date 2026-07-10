@@ -58,7 +58,380 @@ class OpenAiDocumentAnalyzer
             $merged[] = $parcel;
         }
 
-        return $merged;
+        return $this->removeConflictingMsaPrefixes($merged, $textParcels);
+    }
+
+    /**
+     * @param  array<int, mixed>  $parcels
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
+     * @return array<int, mixed>
+     */
+    private function removeConflictingMsaPrefixes(array $parcels, array $textParcels = []): array
+    {
+        $normalizedParcels = [];
+
+        foreach ($parcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+            $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
+            $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
+            $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
+
+            if ($prefixe === '000') {
+                $prefixe = '';
+            }
+
+            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+                continue;
+            }
+
+            $normalizedParcels[] = [
+                'dept' => $dept,
+                'com' => $com,
+                'prefixe' => $prefixe,
+                'section' => $section,
+                'numero_plan' => $numeroPlan,
+            ];
+        }
+
+        $contextCounts = [];
+        $prefixHints = [];
+
+        foreach ($normalizedParcels as $parcel) {
+            $contextCounts[$parcel['dept'].'|'.$parcel['com']] = ($contextCounts[$parcel['dept'].'|'.$parcel['com']] ?? 0) + 1;
+
+            if ($parcel['prefixe'] !== '' && $parcel['com'] === $parcel['prefixe']) {
+                $prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']] = $parcel['prefixe'];
+            }
+        }
+
+        $enriched = [];
+
+        foreach ($normalizedParcels as $parcel) {
+            $hintKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                $parcel['prefixe'] === ''
+                && isset($prefixHints[$hintKey])
+                && $parcel['com'] !== $prefixHints[$hintKey]
+            ) {
+                $parcel['prefixe'] = $prefixHints[$hintKey];
+            }
+
+            $enriched[] = $parcel;
+        }
+
+        $sectionPrefixCounts = [];
+        $sectionHasEmptyPrefix = [];
+
+        foreach ($enriched as $parcel) {
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
+
+            if ($parcel['prefixe'] === '') {
+                $sectionHasEmptyPrefix[$sectionKey] = true;
+                continue;
+            }
+
+            $sectionPrefixCounts[$sectionKey][$parcel['prefixe']] = ($sectionPrefixCounts[$sectionKey][$parcel['prefixe']] ?? 0) + 1;
+        }
+
+        $trustedPrefixBySection = [];
+
+        foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
+            if (isset($sectionHasEmptyPrefix[$sectionKey])) {
+                continue;
+            }
+
+            if (count($prefixCounts) !== 1) {
+                continue;
+            }
+
+            $prefixe = array_key_first($prefixCounts);
+            $count = $prefixCounts[$prefixe] ?? 0;
+
+            if ($prefixe !== null && $count >= 2) {
+                $trustedPrefixBySection[$sectionKey] = (string) $prefixe;
+            }
+        }
+
+        foreach ($enriched as $index => $parcel) {
+            if ($parcel['prefixe'] !== '') {
+                continue;
+            }
+
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
+
+            if (isset($trustedPrefixBySection[$sectionKey])) {
+                $enriched[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
+            }
+        }
+
+        $trustedPrefixBySection = [];
+
+        foreach ($sectionPrefixCounts as $sectionKey => $prefixCounts) {
+            if (count($prefixCounts) !== 1) {
+                if (isset($sectionHasEmptyPrefix[$sectionKey])) {
+                    continue;
+                }
+
+                continue;
+            }
+
+            $prefixe = array_key_first($prefixCounts);
+            $count = $prefixCounts[$prefixe] ?? 0;
+
+            if ($prefixe !== null && $count >= 2) {
+                $trustedPrefixBySection[$sectionKey] = (string) $prefixe;
+            }
+        }
+
+        foreach ($enriched as $index => $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $section = (string) ($row['section'] ?? '');
+
+            if ($prefixe !== '') {
+                continue;
+            }
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $contextKey = $dept.'|'.$com;
+
+            if (isset($trustedPrefixBySection[$sectionKey])) {
+                $enriched[$index]['prefixe'] = $trustedPrefixBySection[$sectionKey];
+                continue;
+            }
+        }
+
+        $prefixesByExactParcelWithoutPrefix = [];
+        $rowsBySectionNumber = [];
+
+        foreach ($enriched as $parcel) {
+            $exactWithoutPrefixKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+            $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
+
+            $prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey][$parcel['prefixe']] = true;
+            $rowsBySectionNumber[$sectionNumberKey][] = $parcel;
+        }
+
+        $supportPrefixByDeptSectionNumber = [];
+
+        foreach ($enriched as $parcel) {
+            if ($parcel['prefixe'] === '') {
+                continue;
+            }
+
+            if ($parcel['com'] === $parcel['prefixe']) {
+                $supportPrefixByDeptSectionNumber[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']][$parcel['prefixe']] = true;
+            }
+        }
+
+        $preferredPrefixByExactParcel = [];
+
+        foreach ($prefixesByExactParcelWithoutPrefix as $exactWithoutPrefixKey => $prefixes) {
+            $availablePrefixes = array_keys($prefixes);
+
+            if (in_array('', $availablePrefixes, true)) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                continue;
+            }
+
+            if (count($availablePrefixes) <= 1) {
+                continue;
+            }
+
+            [$dept, $com, $section, $numeroPlan] = explode('|', $exactWithoutPrefixKey);
+
+            $sectionKey = $dept.'|'.$com.'|'.$section;
+            $bestPrefix = null;
+            $bestCount = -1;
+
+            foreach ($availablePrefixes as $candidatePrefix) {
+                if ($candidatePrefix === '') {
+                    continue;
+                }
+
+                $count = $sectionPrefixCounts[$sectionKey][$candidatePrefix] ?? 0;
+
+                if ($count > $bestCount) {
+                    $bestPrefix = $candidatePrefix;
+                    $bestCount = $count;
+                }
+            }
+
+            if ($bestPrefix !== null) {
+                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = $bestPrefix;
+            }
+        }
+
+        $filtered = [];
+
+        foreach ($enriched as $parcel) {
+            $exactWithoutPrefixKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+                && $parcel['prefixe'] !== $preferredPrefixByExactParcel[$exactWithoutPrefixKey]
+            ) {
+                continue;
+            }
+
+            $sectionNumberKey = $parcel['section'].'|'.$parcel['numero_plan'];
+            $contextKey = $parcel['dept'].'|'.$parcel['com'];
+
+            $deptSectionNumberKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                $parcel['prefixe'] !== ''
+                && isset($supportPrefixByDeptSectionNumber[$deptSectionNumberKey][$parcel['prefixe']])
+                && $parcel['com'] !== $parcel['prefixe']
+            ) {
+                $parcel['prefixe'] = '';
+            }
+
+            $sectionKey = $parcel['dept'].'|'.$parcel['com'].'|'.$parcel['section'];
+            $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$parcel['prefixe']] ?? 0;
+            $contextEmptyPrefixCount = 0;
+
+            foreach ($enriched as $candidate) {
+                if (
+                    $candidate['dept'] === $parcel['dept']
+                    && $candidate['com'] === $parcel['com']
+                    && $candidate['prefixe'] === ''
+                ) {
+                    $contextEmptyPrefixCount++;
+                }
+            }
+
+            if (
+                $parcel['prefixe'] !== ''
+                && $sectionPrefixCount <= 2
+                && $contextEmptyPrefixCount >= 3
+                && ! isset($prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']])
+                && ! isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])
+            ) {
+                $parcel['prefixe'] = '';
+            }
+
+            $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
+            $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);
+
+            if (
+                $parcel['prefixe'] !== ''
+                && $hasExactEmptyVariant
+                && ! isset($prefixHints[$parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan']])
+            ) {
+                continue;
+            }
+
+            if ($parcel['prefixe'] !== '' && $parcel['com'] === $parcel['prefixe']) {
+                $hasBetterComForSamePrefix = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['prefixe'] === $parcel['prefixe']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['com'] !== $parcel['com']
+                    ) {
+                        $hasBetterComForSamePrefix = true;
+                        break;
+                    }
+                }
+
+                if ($hasBetterComForSamePrefix) {
+                    continue;
+                }
+            }
+
+            if ($parcel['prefixe'] !== '') {
+                $currentContextCount = $contextCounts[$contextKey] ?? 0;
+                $hasStrongerEmptyContext = false;
+
+                foreach ($rowsBySectionNumber[$sectionNumberKey] ?? [] as $candidate) {
+                    if ($candidate['prefixe'] !== '') {
+                        continue;
+                    }
+
+                    $candidateContextKey = $candidate['dept'].'|'.$candidate['com'];
+                    $candidateContextCount = $contextCounts[$candidateContextKey] ?? 0;
+
+                    if ($candidateContextCount > $currentContextCount) {
+                        $hasStrongerEmptyContext = true;
+                        break;
+                    }
+                }
+
+                if ($hasStrongerEmptyContext) {
+                    continue;
+                }
+            }
+
+            $hintKey = $parcel['dept'].'|'.$parcel['section'].'|'.$parcel['numero_plan'];
+
+            if (
+                isset($prefixHints[$hintKey])
+                && $parcel['com'] === $prefixHints[$hintKey]
+            ) {
+                $hasBetterComForHint = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['com'] !== $parcel['com']
+                        && $candidate['prefixe'] === $prefixHints[$hintKey]
+                    ) {
+                        $hasBetterComForHint = true;
+                        break;
+                    }
+                }
+
+                if ($hasBetterComForHint) {
+                    continue;
+                }
+            }
+
+            if ($parcel['prefixe'] === '') {
+                $hasPrefixedCandidateUsingCurrentComAsPrefix = false;
+
+                foreach ($enriched as $candidate) {
+                    if (
+                        $candidate['dept'] === $parcel['dept']
+                        && $candidate['section'] === $parcel['section']
+                        && $candidate['numero_plan'] === $parcel['numero_plan']
+                        && $candidate['prefixe'] === $parcel['com']
+                        && $candidate['com'] !== $parcel['com']
+                    ) {
+                        $hasPrefixedCandidateUsingCurrentComAsPrefix = true;
+                        break;
+                    }
+                }
+
+                if ($hasPrefixedCandidateUsingCurrentComAsPrefix) {
+                    continue;
+                }
+            }
+
+            $dedupeKey = implode('|', [
+                $parcel['dept'],
+                $parcel['com'],
+                $parcel['prefixe'],
+                $parcel['section'],
+                $parcel['numero_plan'],
+            ]);
+
+            $filtered[$dedupeKey] = $parcel;
+        }
+
+        return array_values($filtered);
     }
 
     private function detectMsaDocumentDept(string $text): string
@@ -105,27 +478,38 @@ class OpenAiDocumentAnalyzer
             if (preg_match('/^(\d{2})\s+(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1 && $lastDept !== '') {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
-            preg_match_all(
-                '/(?<![A-Z0-9])([A-HM-Z]|Z[A-Z0-9])\s*([0-9OA]{4})(?![0-9])/u',
-                $line,
-                $matches,
-                PREG_SET_ORDER
-            );
+            $tokens = preg_split('/\s+/u', $line) ?: [];
 
-            if ($this->hasContradictoryMsaTextCandidates($matches)) {
-                continue;
-            }
+            foreach ($tokens as $tokenIndex => $token) {
+                $nextToken = $tokens[$tokenIndex + 1] ?? '';
 
-            foreach ($matches as $match) {
-                $section = $this->normalizeMsaTextSection($match[1]);
-                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
+                if ($nextToken === '') {
+                    continue;
+                }
+
+                if (preg_match('/^\d{5,}$/', $nextToken) === 1) {
+                    continue;
+                }
+
+                $section = $this->normalizeMsaTextSection($token);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($nextToken);
 
                 if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
                     continue;
+                }
+
+                $prefixe = '';
+                $previousToken = $tokens[$tokenIndex - 1] ?? '';
+
+                if (
+                    preg_match('/^\d{3}$/', $previousToken) === 1
+                    && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
+                ) {
+                    $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
                 }
 
                 [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine($lines, $index, $lastDept, $lastCom);
@@ -133,7 +517,7 @@ class OpenAiDocumentAnalyzer
                 $parcels[] = [
                     'dept' => $contextDept,
                     'com' => $contextCom,
-                    'prefixe' => '',
+                    'prefixe' => $prefixe,
                     'section' => $section,
                     'numero_plan' => $numeroPlan,
                 ];
@@ -257,6 +641,28 @@ class OpenAiDocumentAnalyzer
         return [$lastDept, $lastCom];
     }
 
+    /**
+     * @param array<int, string> $tokens
+     */
+    private function isMsaTextComToken(array $tokens, int $tokenIndex): bool
+    {
+        $token = $tokens[$tokenIndex] ?? '';
+
+        if (preg_match('/^\d{3}$/', $token) !== 1) {
+            return false;
+        }
+
+        if ($tokenIndex === 1 && preg_match('/^\d{2}$/', $tokens[0] ?? '') === 1) {
+            return true;
+        }
+
+        if ($tokenIndex === 0 && preg_match('/^[A-Z]$/', $tokens[1] ?? '') === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
     private function normalizeMsaTextLine(string $line): string
     {
         $line = mb_strtoupper($line);
@@ -284,8 +690,8 @@ class OpenAiDocumentAnalyzer
     {
         $raw = mb_strtoupper(trim($value));
 
-        if (str_starts_with($raw, '0')) {
-            return '';
+        if (preg_match('/^0([A-Z])$/', $raw, $matches) === 1) {
+            return '0'.$matches[1];
         }
 
         $section = strtr($raw, [

@@ -1163,6 +1163,7 @@ class DocumentNormalizationService
         }
 
         $contextCounts = [];
+        $contextPrefixCounts = [];
         $prefixHints = [];
 
         foreach ($normalizedRows as $row) {
@@ -1176,7 +1177,13 @@ class DocumentNormalizationService
                 continue;
             }
 
-            $contextCounts[$dept.'|'.$com] = ($contextCounts[$dept.'|'.$com] ?? 0) + 1;
+            $contextKey = $dept.'|'.$com;
+            $contextCounts[$contextKey] = ($contextCounts[$contextKey] ?? 0) + 1;
+
+            if ($prefixe !== '') {
+                $contextPrefixCounts[$contextKey][$prefixe] =
+                    ($contextPrefixCounts[$contextKey][$prefixe] ?? 0) + 1;
+            }
 
             // Cas MSA : une ligne support peut porter le vrai prefixe, mais avec COM = PREFIXE.
             // Exemple support : 85|224|224|0G|0949
@@ -1424,6 +1431,7 @@ class DocumentNormalizationService
 
             $sectionKey = $dept.'|'.$com.'|'.$section;
             $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$prefixe] ?? 0;
+            $contextPrefixCount = $contextPrefixCounts[$contextKey][$prefixe] ?? 0;
             $contextEmptyPrefixCount = 0;
 
             foreach ($enrichedRows as $candidate) {
@@ -1439,6 +1447,7 @@ class DocumentNormalizationService
             if (
                 $prefixe !== ''
                 && $sectionPrefixCount <= 2
+                && $contextPrefixCount < 2
                 && $contextEmptyPrefixCount >= 3
                 && ! isset($prefixHints[$dept.'|'.$section.'|'.$numeroPlan])
                 && ! isset($preferredPrefixByExactParcel[$exactWithoutPrefixKey])

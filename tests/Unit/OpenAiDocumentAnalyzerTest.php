@@ -111,3 +111,86 @@ TEXT);
     expect($parcelB0146)->not->toBeEmpty();
     expect($parcelC0035)->not->toBeEmpty();
 });
+
+it('extracts MSA rows with an owner marker before a visible prefix', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(LlmClient::class),
+        new DocumentSchemaFactory
+    );
+
+    $parcels = $analyzer->extractMsaTextParcels(<<<'TEXT'
+85 146 + 00439 O                  224 AE 0008                  02 P
+85 146 + 01239 O                  224 AE 0101                  02 P
+85 146 L 00503 O                  224      G 0414              02 T
+TEXT);
+
+    expect($parcels)->toContain([
+        'dept' => '85',
+        'com' => '146',
+        'prefixe' => '224',
+        'section' => 'AE',
+        'numero_plan' => '0008',
+    ]);
+
+    expect($parcels)->toContain([
+        'dept' => '85',
+        'com' => '146',
+        'prefixe' => '224',
+        'section' => 'AE',
+        'numero_plan' => '0101',
+    ]);
+
+    expect($parcels)->toContain([
+        'dept' => '85',
+        'com' => '146',
+        'prefixe' => '224',
+        'section' => '0G',
+        'numero_plan' => '0414',
+    ]);
+});
+
+it('prefers deterministic MSA text parcels over noisy OpenAI parcels', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.text_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    [
+                        'dept' => '90',
+                        'com' => '104',
+                        'prefixe' => '',
+                        'section' => 'ZH',
+                        'numero_plan' => '0055',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $result = $analyzer->analyzeText(
+        "72 294 B 00269 ZH 0055 03 P\n"
+    );
+
+    expect($result['extraction']['msa_parcels'])->toBe([
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+    ]);
+});

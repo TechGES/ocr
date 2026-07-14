@@ -441,3 +441,79 @@ it('clears minor suspicious MSA prefixes when one explicit prefix dominates', fu
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('keeps a rare MSA prefix when it is confirmed by the same cadastral context', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '372',
+                    'section' => 'ZL',
+                    'numero_plan' => '0051',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '372',
+                    'section' => 'ZO',
+                    'numero_plan' => '0016',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '372',
+                    'section' => 'ZI',
+                    'numero_plan' => '0016',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '',
+                    'section' => 'YA',
+                    'numero_plan' => '0001',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '',
+                    'section' => 'YB',
+                    'numero_plan' => '0002',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '018',
+                    'prefixe' => '',
+                    'section' => 'YC',
+                    'numero_plan' => '0003',
+                ],
+            ],
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '018'
+            && ($row['section'] ?? '') === 'ZI'
+            && ($row['numero_plan'] ?? '') === '0016'
+    ));
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '018',
+            'prefixe' => '372',
+            'section' => 'ZI',
+            'numero_plan' => '0016',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});

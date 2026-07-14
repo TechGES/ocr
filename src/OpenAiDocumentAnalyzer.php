@@ -22,6 +22,48 @@ class OpenAiDocumentAnalyzer
     {
         $llmParcels = $this->filterSuspiciousMsaLlmParcels($llmParcels);
 
+        if ($textParcels !== []) {
+            $deduplicated = [];
+
+            foreach ($textParcels as $parcel) {
+                if (! is_array($parcel)) {
+                    continue;
+                }
+
+                $dept = trim((string) ($parcel['dept'] ?? ''));
+                $com = trim((string) ($parcel['com'] ?? ''));
+                $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
+                $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
+                $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
+
+                if ($prefixe === '000') {
+                    $prefixe = '';
+                }
+
+                if (
+                    $dept === ''
+                    || $com === ''
+                    || $section === ''
+                    || $numeroPlan === ''
+                ) {
+                    continue;
+                }
+
+                $normalizedParcel = [
+                    'dept' => $dept,
+                    'com' => $com,
+                    'prefixe' => $prefixe,
+                    'section' => $section,
+                    'numero_plan' => $numeroPlan,
+                ];
+
+                $key = implode('|', $normalizedParcel);
+                $deduplicated[$key] = $normalizedParcel;
+            }
+
+            return array_values($deduplicated);
+        }
+
         if ($llmParcels === []) {
             return array_values($textParcels);
         }
@@ -458,7 +500,10 @@ class OpenAiDocumentAnalyzer
     private function extractMsaParcelsFromText(string $text): array
     {
         $rawLines = preg_split('/\R+/u', $text) ?: [];
-        $lines = array_map(fn (string $line): string => $this->normalizeMsaTextLine($line), $rawLines);
+        $lines = array_map(
+            fn (string $line): string => $this->normalizeMsaTextLine($line),
+            $rawLines
+        );
 
         $lastDept = '';
         $lastCom = '';
@@ -475,53 +520,161 @@ class OpenAiDocumentAnalyzer
                 continue;
             }
 
-            if (preg_match('/^(\d{2})\s+(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1) {
+            /*
+             * Ligne complète MSA :
+             *
+             * 49 367 + 00293 C 0932
+             * 49 331 B 01431 077 B 0197
+             * 49 018 G 01015 372 ZI 0016
+             *
+             * Le compte propriétaire reste ignoré.
+             */
+            if (
+                preg_match(
+                    '/^(?<dept>\d{2})\s+'
+                    .'(?<com>\d{3})\s+'
+                    .'(?:[A-Z0+]\s+)?'
+                    .'\d{4,5}\s+'
+                    .'(?:[O0]\s+)?'
+                    .'(?:(?<prefixe>\d{3})\s+)?'
+                    .'(?<section>[A-Z]{1,2}|0[A-Z])\s+'
+                    .'(?<numero>[0-9OA]{4})'
+                    .'(?![0-9])/u',
+                    $line,
+                    $matches
+                ) === 1
+            ) {
+                $lastDept = str_pad($matches['dept'], 2, '0', STR_PAD_LEFT);
+                $lastCom = str_pad($matches['com'], 3, '0', STR_PAD_LEFT);
+
+                $section = $this->normalizeMsaTextSection($matches['section']);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($matches['numero']);
+                $prefixe = isset($matches['prefixe'])
+                    && trim((string) $matches['prefixe']) !== ''
+                        ? str_pad((string) $matches['prefixe'], 3, '0', STR_PAD_LEFT)
+                        : '';
+
+                if (
+                    $section !== ''
+                    && $numeroPlan !== ''
+                    && $numeroPlan !== '0000'
+                ) {
+                    $parcels[] = [
+                        'dept' => $lastDept,
+                        'com' => $lastCom,
+                        'prefixe' => $prefixe,
+                        'section' => $section,
+                        'numero_plan' => $numeroPlan,
+                    ];
+                }
+
+                continue;
+            }
+
+            /*
+             * Ligne de continuation :
+             *
+             * VB 0009
+             * 108 ZE 0187
+             * 224 A 0020
+             * 077 B 0207
+             */
+            if (
+                preg_match(
+                    '/^(?:(?<prefixe>\d{3})\s+)?'
+                    .'(?<section>[A-Z]{1,2}|0[A-Z])\s+'
+                    .'(?<numero>[0-9OA]{4})'
+                    .'(?![0-9])/u',
+                    $line,
+                    $matches
+                ) === 1
+            ) {
+                $section = $this->normalizeMsaTextSection($matches['section']);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($matches['numero']);
+                $prefixe = isset($matches['prefixe'])
+                    && trim((string) $matches['prefixe']) !== ''
+                        ? str_pad((string) $matches['prefixe'], 3, '0', STR_PAD_LEFT)
+                        : '';
+
+                if (
+                    $section !== ''
+                    && $numeroPlan !== ''
+                    && $numeroPlan !== '0000'
+                    && $lastDept !== ''
+                    && $lastCom !== ''
+                ) {
+                    $parcels[] = [
+                        'dept' => $lastDept,
+                        'com' => $lastCom,
+                        'prefixe' => $prefixe,
+                        'section' => $section,
+                        'numero_plan' => $numeroPlan,
+                    ];
+                }
+
+                continue;
+            }
+
+            /*
+             * Mise à jour du contexte sans extraire le compte propriétaire.
+             *
+             * Ce bloc doit rester après la détection des continuations :
+             * "224 A 0020" est un préfixe + parcelle, pas une commune.
+             * "279 B 00140" reste un compte propriétaire car le numéro
+             * comporte cinq chiffres et ne correspond pas à une parcelle.
+             */
+            if (preg_match('/^(\d{2})\s+(\d{3})\b/u', $line, $matches) === 1) {
                 $lastDept = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
                 $lastCom = str_pad($matches[2], 3, '0', STR_PAD_LEFT);
-            } elseif (preg_match('/^(\d{3})\s+[A-Z]\s+\d{4}\b/u', $line, $matches) === 1 && $lastDept !== '') {
+            } elseif (
+                preg_match('/^(\d{3})\s+[A-Z0]\s+\d{4,5}\b/u', $line, $matches) === 1
+                && $lastDept !== ''
+            ) {
                 $lastCom = str_pad($matches[1], 3, '0', STR_PAD_LEFT);
             }
 
-            $tokens = preg_split('/\s+/u', $line) ?: [];
+            /*
+             * Fallback strict pour les lignes où la parcelle n'est pas
+             * parfaitement alignée au début de la transcription.
+             */
+            preg_match_all(
+                '/(?<![A-Z0-9])((?:[A-Z]{2}|0[A-Z]))\s+([0-9OA]{4})(?![0-9])/u',
+                $line,
+                $matches,
+                PREG_SET_ORDER
+            );
 
-            foreach ($tokens as $tokenIndex => $token) {
-                $nextToken = $tokens[$tokenIndex + 1] ?? '';
+            if ($this->hasContradictoryMsaTextCandidates($matches)) {
+                continue;
+            }
 
-                if ($nextToken === '') {
-                    continue;
-                }
-
-                if (! $this->looksLikeMsaTextSectionToken($token)) {
-                    continue;
-                }
-
-                if (preg_match('/^\d{5,}$/', $nextToken) === 1) {
-                    continue;
-                }
-
-                $section = $this->normalizeMsaTextSection($token);
-                $numeroPlan = $this->normalizeMsaTextNumeroPlan($nextToken);
-
-                if ($section === '' || $numeroPlan === '' || $numeroPlan === '0000') {
-                    continue;
-                }
-
-                $prefixe = '';
-                $previousToken = $tokens[$tokenIndex - 1] ?? '';
+            foreach ($matches as $match) {
+                $section = $this->normalizeMsaTextSection($match[1]);
+                $numeroPlan = $this->normalizeMsaTextNumeroPlan($match[2]);
 
                 if (
-                    preg_match('/^\d{3}$/', $previousToken) === 1
-                    && ! $this->isMsaTextComToken($tokens, $tokenIndex - 1)
+                    $section === ''
+                    || $numeroPlan === ''
+                    || $numeroPlan === '0000'
                 ) {
-                    $prefixe = str_pad($previousToken, 3, '0', STR_PAD_LEFT);
+                    continue;
                 }
 
-                [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine($lines, $index, $lastDept, $lastCom);
+                [$contextDept, $contextCom] = $this->resolveMsaTextContextAroundLine(
+                    $lines,
+                    $index,
+                    $lastDept,
+                    $lastCom
+                );
+
+                if ($contextDept === '' || $contextCom === '') {
+                    continue;
+                }
 
                 $parcels[] = [
                     'dept' => $contextDept,
                     'com' => $contextCom,
-                    'prefixe' => $prefixe,
+                    'prefixe' => '',
                     'section' => $section,
                     'numero_plan' => $numeroPlan,
                 ];

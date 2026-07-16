@@ -16,9 +16,8 @@ class OpenAiClient implements LlmClient
      */
     public function chatStructured(string $model, array $messages, array $schema): array
     {
-        $response = $this->http()->post('/chat/completions', [
+        $payload = $this->withCompatibleTemperature($model, [
             'model' => $model,
-            'temperature' => 0,
             'messages' => $this->messages($messages),
             'response_format' => [
                 'type' => 'json_schema',
@@ -29,6 +28,8 @@ class OpenAiClient implements LlmClient
                 ],
             ],
         ]);
+
+        $response = $this->http()->post('/chat/completions', $payload);
 
         if ($response->failed()) {
             throw new RuntimeException($response->json('error.message') ?? $response->body() ?: 'OpenAI request failed.');
@@ -66,11 +67,12 @@ class OpenAiClient implements LlmClient
      */
     public function chatText(string $model, array $messages): string
     {
-        $response = $this->http()->post('/chat/completions', [
+        $payload = $this->withCompatibleTemperature($model, [
             'model' => $model,
-            'temperature' => 0,
             'messages' => $this->messages($messages),
         ]);
+
+        $response = $this->http()->post('/chat/completions', $payload);
 
         if ($response->failed()) {
             throw new RuntimeException($response->json('error.message') ?? $response->body() ?: 'OpenAI request failed.');
@@ -119,6 +121,21 @@ class OpenAiClient implements LlmClient
             'vision_model' => config('ges-ocr.openai.vision_model'),
             'available_models' => $response->json('data', []),
         ];
+    }
+
+    /**
+     * GPT-5 models only accept their default temperature.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withCompatibleTemperature(string $model, array $payload): array
+    {
+        if (! str_starts_with(strtolower(trim($model)), 'gpt-5')) {
+            $payload['temperature'] = 0;
+        }
+
+        return $payload;
     }
 
     private function http(): PendingRequest

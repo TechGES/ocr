@@ -517,3 +517,85 @@ it('keeps a rare MSA prefix when it is confirmed by the same cadastral context',
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('keeps homonymous MSA parcels that differ only by prefix', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '',
+                    'section' => 'B',
+                    'numero_plan' => '1123',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1123',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1101',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1102',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '',
+                    'section' => 'ZK',
+                    'numero_plan' => '0001',
+                ],
+            ],
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '367'
+            && ($row['section'] ?? '') === '0B'
+            && ($row['numero_plan'] ?? '') === '1123'
+    ));
+
+    usort(
+        $targetRows,
+        static fn (array $left, array $right): int =>
+            ($left['prefixe'] ?? '') <=> ($right['prefixe'] ?? '')
+    );
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '1123',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '043',
+            'section' => '0B',
+            'numero_plan' => '1123',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});

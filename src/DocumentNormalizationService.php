@@ -1361,7 +1361,37 @@ class DocumentNormalizationService
             $availablePrefixes = array_keys($prefixes);
 
             if (in_array('', $availablePrefixes, true)) {
-                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                [$dept, $com, $section, $numeroPlan] = explode('|', $exactWithoutPrefixKey);
+
+                $sectionKey = $dept.'|'.$com.'|'.$section;
+                $contextKey = $dept.'|'.$com;
+                $hasConfirmedExplicitPrefix = false;
+
+                foreach ($availablePrefixes as $candidatePrefix) {
+                    if ($candidatePrefix === '') {
+                        continue;
+                    }
+
+                    $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$candidatePrefix] ?? 0;
+                    $contextPrefixCount = $contextPrefixCounts[$contextKey][$candidatePrefix] ?? 0;
+                    $hintKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+                    if (
+                        $sectionPrefixCount >= 2
+                        || $contextPrefixCount >= 2
+                        || isset($prefixHints[$hintKey])
+                    ) {
+                        $hasConfirmedExplicitPrefix = true;
+                        break;
+                    }
+                }
+
+                // Une variante vide et une variante préfixée confirmée peuvent
+                // représenter deux parcelles cadastrales distinctes.
+                if (! $hasConfirmedExplicitPrefix) {
+                    $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                }
+
                 continue;
             }
 
@@ -1459,11 +1489,14 @@ class DocumentNormalizationService
             $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
             $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);
 
-            // Si la même parcelle existe avec prefixe vide et prefixe non vide sur le même dept/com,
-            // on garde la version vide, sauf si le prefixe a été confirmé par une ligne support.
+            // Si la même parcelle existe avec préfixe vide et préfixe non vide,
+            // supprimer uniquement la variante préfixée isolée.
+            // Une variante confirmée dans son contexte reste une parcelle distincte.
             if (
                 $prefixe !== ''
                 && $hasExactEmptyVariant
+                && $sectionPrefixCount < 2
+                && $contextPrefixCount < 2
                 && ! isset($prefixHints[$dept.'|'.$section.'|'.$numeroPlan])
             ) {
                 continue;

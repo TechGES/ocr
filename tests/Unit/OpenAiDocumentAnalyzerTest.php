@@ -194,3 +194,211 @@ it('prefers deterministic MSA text parcels over noisy OpenAI parcels', function 
         ],
     ]);
 });
+
+it('merges trusted OpenAI MSA parcels missing from deterministic text in a known context', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.text_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    [
+                        'dept' => '72',
+                        'com' => '294',
+                        'prefixe' => '',
+                        'section' => 'ZH',
+                        'numero_plan' => '0055',
+                    ],
+                    [
+                        'dept' => '72',
+                        'com' => '294',
+                        'prefixe' => '',
+                        'section' => 'ZC',
+                        'numero_plan' => '0041',
+                    ],
+                    [
+                        'dept' => '90',
+                        'com' => '104',
+                        'prefixe' => '',
+                        'section' => 'ZK',
+                        'numero_plan' => '0001',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $result = $analyzer->analyzeText(
+        "72 294 B 00269 ZH 0055 03 P\n"
+    );
+
+    expect($result['extraction']['msa_parcels'])->toBe([
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZH',
+            'numero_plan' => '0055',
+        ],
+        [
+            'dept' => '72',
+            'com' => '294',
+            'prefixe' => '',
+            'section' => 'ZC',
+            'numero_plan' => '0041',
+        ],
+    ]);
+});
+
+it('keeps homonymous MSA parcels when their explicit prefixes differ', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.text_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '043',
+                        'section' => 'ZI',
+                        'numero_plan' => '1123',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $result = $analyzer->analyzeText(
+        "49 367 C 00449 ZI 1123 02 T\n"
+    );
+
+    expect($result['extraction']['msa_parcels'])->toBe([
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => 'ZI',
+            'numero_plan' => '1123',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '043',
+            'section' => 'ZI',
+            'numero_plan' => '1123',
+        ],
+    ]);
+});
+
+it('preserves MSA plan numbers beginning with four in deterministic text', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(LlmClient::class),
+        new DocumentSchemaFactory
+    );
+
+    $parcels = $analyzer->extractMsaTextParcels(<<<'TEXT'
+49 367 + 00301 B 4130 03 P
+B 4132 03 P
+TEXT);
+
+    expect($parcels)->toContain([
+        'dept' => '49',
+        'com' => '367',
+        'prefixe' => '',
+        'section' => '0B',
+        'numero_plan' => '4130',
+    ]);
+
+    expect($parcels)->toContain([
+        'dept' => '49',
+        'com' => '367',
+        'prefixe' => '',
+        'section' => '0B',
+        'numero_plan' => '4132',
+    ]);
+});
+
+it('preserves MSA plan numbers beginning with four from OpenAI vision data', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.text_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '',
+                        'section' => 'B',
+                        'numero_plan' => '4130',
+                    ],
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '',
+                        'section' => 'B',
+                        'numero_plan' => '4132',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $result = $analyzer->analyzeText(
+        'MSA sans ligne cadastrale textuelle exploitable'
+    );
+
+    expect($result['extraction']['msa_parcels'])->toBe([
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '4130',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '4132',
+        ],
+    ]);
+});

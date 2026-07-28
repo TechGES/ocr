@@ -20,87 +20,109 @@ class OpenAiDocumentAnalyzer
      */
     private function mergeMsaParcels(array $llmParcels, array $textParcels): array
     {
-        $llmParcels = $this->filterSuspiciousMsaLlmParcels($llmParcels);
-
-        if ($textParcels !== []) {
-            $deduplicated = [];
-
-            foreach ($textParcels as $parcel) {
-                if (! is_array($parcel)) {
-                    continue;
-                }
-
-                $dept = trim((string) ($parcel['dept'] ?? ''));
-                $com = trim((string) ($parcel['com'] ?? ''));
-                $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
-                $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
-                $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
-
-                if ($prefixe === '000') {
-                    $prefixe = '';
-                }
-
-                if (
-                    $dept === ''
-                    || $com === ''
-                    || $section === ''
-                    || $numeroPlan === ''
-                ) {
-                    continue;
-                }
-
-                $normalizedParcel = [
-                    'dept' => $dept,
-                    'com' => $com,
-                    'prefixe' => $prefixe,
-                    'section' => $section,
-                    'numero_plan' => $numeroPlan,
-                ];
-
-                $key = implode('|', $normalizedParcel);
-                $deduplicated[$key] = $normalizedParcel;
-            }
-
-            return array_values($deduplicated);
-        }
-
-        if ($llmParcels === []) {
-            return array_values($textParcels);
-        }
-
-        if ($textParcels === []) {
-            return array_values($llmParcels);
-        }
+        $llmParcels = $this->filterSuspiciousMsaLlmParcels(
+            $llmParcels
+        );
 
         $merged = [];
-        $seen = [];
+        $knownTextContexts = [];
 
-        foreach (array_merge($llmParcels, $textParcels) as $parcel) {
+        foreach ($textParcels as $parcel) {
             if (! is_array($parcel)) {
                 continue;
             }
 
-            $dept = (string) ($parcel['dept'] ?? '');
-            $com = (string) ($parcel['com'] ?? '');
-            $prefixe = (string) ($parcel['prefixe'] ?? '');
-            $section = (string) ($parcel['section'] ?? '');
-            $numeroPlan = (string) ($parcel['numero_plan'] ?? '');
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+            $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
+            $section = mb_strtoupper(
+                trim((string) ($parcel['section'] ?? ''))
+            );
+            $numeroPlan = trim(
+                (string) ($parcel['numero_plan'] ?? '')
+            );
 
-            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+            if ($prefixe === '000') {
+                $prefixe = '';
+            }
+
+            if (
+                $dept === ''
+                || $com === ''
+                || $section === ''
+                || $numeroPlan === ''
+            ) {
                 continue;
             }
 
-            $key = $dept.'|'.$com.'|'.$prefixe.'|'.$section.'|'.$numeroPlan;
+            $normalizedParcel = [
+                'dept' => $dept,
+                'com' => $com,
+                'prefixe' => $prefixe,
+                'section' => $section,
+                'numero_plan' => $numeroPlan,
+            ];
 
-            if (isset($seen[$key])) {
-                continue;
-            }
+            $key = $this->msaParcelKey($normalizedParcel);
 
-            $seen[$key] = true;
-            $merged[] = $parcel;
+            $merged[$key] = $normalizedParcel;
+            $knownTextContexts[$dept.'|'.$com] = true;
         }
 
-        return $this->removeConflictingMsaPrefixes($merged, $textParcels);
+        /*
+         * Sans source textuelle déterministe exploitable,
+         * conserver les lignes structurées valides fournies
+         * par l’analyse visuelle.
+         */
+        if ($merged === []) {
+            foreach ($llmParcels as $parcel) {
+                if (! is_array($parcel)) {
+                    continue;
+                }
+
+                $key = $this->msaParcelKey($parcel);
+
+                if ($key === '....') {
+                    continue;
+                }
+
+                $merged[$key] = $parcel;
+            }
+
+            return array_values($merged);
+        }
+
+        /*
+         * Lorsque le texte fournit déjà des parcelles,
+         * OpenAI peut uniquement compléter un contexte
+         * DEPT/COM confirmé par cette source déterministe.
+         *
+         * Le préfixe fait partie de la clé cadastrale :
+         * une variante vide et une variante explicitement
+         * préfixée restent donc deux parcelles distinctes.
+         */
+        foreach ($llmParcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+
+            if (! isset($knownTextContexts[$dept.'|'.$com])) {
+                continue;
+            }
+
+            $key = $this->msaParcelKey($parcel);
+
+            if ($key === '....' || isset($merged[$key])) {
+                continue;
+            }
+
+            $merged[$key] = $parcel;
+        }
+
+        return array_values($merged);
     }
 
     /**
@@ -888,11 +910,7 @@ class OpenAiDocumentAnalyzer
         }
 
         if (strlen($digits) > 4) {
-            $digits = substr($digits, -4);
-        }
-
-        if (strlen($digits) === 4 && str_starts_with($digits, '4')) {
-            $digits = '0'.substr($digits, 1);
+            return '';
         }
 
         if ((int) $digits >= 5000) {
@@ -1054,7 +1072,14 @@ class OpenAiDocumentAnalyzer
             return null;
         }
 
-        if (! preg_match('/^[A-Z]{1,2}$/', $section)) {
+        if (preg_match('/^[A-Z]$/', $section) === 1) {
+            $section = '0'.$section;
+        }
+
+        if (
+            preg_match('/^(?:0[A-Z]|[A-Z]{2})$/', $section)
+            !== 1
+        ) {
             return null;
         }
 
@@ -1072,10 +1097,6 @@ class OpenAiDocumentAnalyzer
 
         if ($numeroPlan === '0000') {
             return null;
-        }
-
-        if (str_starts_with($numeroPlan, '4')) {
-            $numeroPlan = '0'.substr($numeroPlan, 1);
         }
 
         if ((int) $numeroPlan >= 5000) {

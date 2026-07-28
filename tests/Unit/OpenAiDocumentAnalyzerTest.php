@@ -402,3 +402,126 @@ it('preserves MSA plan numbers beginning with four from OpenAI vision data', fun
         ],
     ]);
 });
+
+it('only adds vision MSA parcels corroborated by the source text', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.vision_model', 'gpt-4.1');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    // Ligne Vision correcte, absente du résultat déterministe,
+                    // mais explicitement visible dans le texte source.
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '043',
+                        'section' => 'B',
+                        'numero_plan' => '1123',
+                    ],
+
+                    // Faux préfixe : le texte contient ZB 0013 sans 043.
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '043',
+                        'section' => 'ZB',
+                        'numero_plan' => '0013',
+                    ],
+
+                    // Mauvaise section : le texte contient YA 0091.
+                    [
+                        'dept' => '49',
+                        'com' => '089',
+                        'prefixe' => '',
+                        'section' => 'VA',
+                        'numero_plan' => '0091',
+                    ],
+
+                    // Valeur issue d’un total, absente des lignes cadastrales.
+                    [
+                        'dept' => '49',
+                        'com' => '367',
+                        'prefixe' => '',
+                        'section' => 'B',
+                        'numero_plan' => '1083',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $imagePath = tempnam(sys_get_temp_dir(), 'id3202-');
+
+    if ($imagePath === false) {
+        throw new RuntimeException('Unable to create temporary image fixture.');
+    }
+
+    file_put_contents($imagePath, 'fake-image-content');
+
+    try {
+        $result = $analyzer->analyzeMsaImagesPageByPage(
+            [$imagePath],
+            [
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '',
+                    'section' => 'ZB',
+                    'numero_plan' => '0013',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '089',
+                    'prefixe' => '',
+                    'section' => 'YA',
+                    'numero_plan' => '0091',
+                ],
+            ],
+            <<<'TEXT'
+49 367 + 00318 043 B 1123 03 T
+49 367 C 00385 ZB 0013 02 T
+49 089 G 00106 O YA 0091 A 03 T
+* TOTAL COMMUNE 1083354
+TEXT
+        );
+    } finally {
+        @unlink($imagePath);
+    }
+
+    expect($result['extraction']['msa_parcels'])->toBe([
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => 'ZB',
+            'numero_plan' => '0013',
+        ],
+        [
+            'dept' => '49',
+            'com' => '089',
+            'prefixe' => '',
+            'section' => 'YA',
+            'numero_plan' => '0091',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '043',
+            'section' => '0B',
+            'numero_plan' => '1123',
+        ],
+    ]);
+});

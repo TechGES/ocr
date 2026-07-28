@@ -63,7 +63,11 @@ class DocumentProcessor
 
                 $textParcels = $this->openAiDocumentAnalyzer->extractMsaTextParcels((string) $extractedText);
 
-                $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage($pageImages, $textParcels);
+                $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage(
+                    $pageImages,
+                    $textParcels,
+                    (string) $extractedText
+                );
 
                 $classification = $analysis['classification'];
                 $extraction = $analysis['extraction'];

@@ -91,6 +91,7 @@ it('uses the one-shot openai analyzer for image inputs', function () {
 
 it('routes MSA-like text pdfs through image analysis for openai', function () {
     config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.processing.cleanup_temporary_files', false);
 
     $inputDetector = Mockery::mock(DocumentInputDetector::class);
     $inputDetector->shouldReceive('detect')
@@ -139,11 +140,18 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
 
     $openAiDocumentAnalyzer->shouldReceive('analyzeMsaImagesPageByPage')
         ->once()
-        ->with(Mockery::type('array'), Mockery::on(
-            fn (array $textParcels): bool =>
-                ($textParcels[0]['section'] ?? null) === '0A'
-                && ($textParcels[0]['numero_plan'] ?? null) === '1150'
-        ))
+        ->with(
+            Mockery::type('array'),
+            Mockery::on(
+                fn (array $textParcels): bool =>
+                    ($textParcels[0]['section'] ?? null) === '0A'
+                    && ($textParcels[0]['numero_plan'] ?? null) === '1150'
+            ),
+            Mockery::on(
+                fn (string $sourceText): bool =>
+                    str_contains($sourceText, 'ZA 0025')
+            )
+        )
         ->andReturn([
             'classification' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,

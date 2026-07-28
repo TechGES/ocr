@@ -18,7 +18,11 @@ class OpenAiDocumentAnalyzer
      * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
      * @return array<int, mixed>
      */
-    private function mergeMsaParcels(array $llmParcels, array $textParcels): array
+    private function mergeMsaParcels(
+        array $llmParcels,
+        array $textParcels,
+        ?string $sourceText = null
+    ): array
     {
         $llmParcels = $this->filterSuspiciousMsaLlmParcels(
             $llmParcels
@@ -110,6 +114,17 @@ class OpenAiDocumentAnalyzer
             $com = trim((string) ($parcel['com'] ?? ''));
 
             if (! isset($knownTextContexts[$dept.'|'.$com])) {
+                continue;
+            }
+
+            if (
+                $sourceText !== null
+                && trim($sourceText) !== ''
+                && ! $this->isMsaLlmParcelCorroboratedBySourceText(
+                    $parcel,
+                    $sourceText
+                )
+            ) {
                 continue;
             }
 
@@ -1112,6 +1127,98 @@ class OpenAiDocumentAnalyzer
         return $parcel;
     }
 
+    /**
+     * Une parcelle Vision absente de l'extraction déterministe ne peut compléter
+     * le résultat que si sa section, son numéro et son éventuel préfixe sont
+     * visibles sur une même ligne du texte source.
+     *
+     * @param  array<string, mixed>  $parcel
+     */
+    private function isMsaLlmParcelCorroboratedBySourceText(
+        array $parcel,
+        string $sourceText
+    ): bool {
+        $trustedParcel = $this->normalizeTrustedMsaLlmParcel($parcel);
+
+        if ($trustedParcel === null) {
+            return false;
+        }
+
+        $expectedPrefix = trim(
+            (string) ($trustedParcel['prefixe'] ?? '')
+        );
+
+        if ($expectedPrefix === '000') {
+            $expectedPrefix = '';
+        }
+
+        $expectedSection = mb_strtoupper(
+            trim((string) ($trustedParcel['section'] ?? ''))
+        );
+
+        $expectedNumber = trim(
+            (string) ($trustedParcel['numero_plan'] ?? '')
+        );
+
+        $lines = preg_split('/\\R/u', $sourceText) ?: [];
+
+        foreach ($lines as $line) {
+            $normalizedLine = $this->normalizeMsaTextLine($line);
+
+            if ($normalizedLine === '') {
+                continue;
+            }
+
+            $tokens = preg_split('/\\s+/u', $normalizedLine) ?: [];
+
+            foreach ($tokens as $index => $token) {
+                $section = $this->normalizeMsaTextSection($token);
+
+                if ($section !== $expectedSection) {
+                    continue;
+                }
+
+                $number = $this->normalizeMsaTextNumeroPlan(
+                    $tokens[$index + 1] ?? ''
+                );
+
+                if ($number !== $expectedNumber) {
+                    continue;
+                }
+
+                $previousTokens = array_slice(
+                    $tokens,
+                    max(0, $index - 3),
+                    min(3, $index)
+                );
+
+                $explicitPrefixes = array_values(array_filter(
+                    $previousTokens,
+                    static fn (string $candidate): bool =>
+                        preg_match('/^\\d{3}$/', $candidate) === 1
+                ));
+
+                if ($expectedPrefix === '') {
+                    /*
+                     * Une référence sans préfixe est corroborée uniquement si
+                     * aucun préfixe cadastral explicite n'est placé devant elle.
+                     */
+                    if ($explicitPrefixes === []) {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                if (in_array($expectedPrefix, $explicitPrefixes, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private function looksLikeMsaTextSectionToken(string $token): bool
     {
         $normalized = mb_strtoupper(trim($token));
@@ -1171,7 +1278,11 @@ class OpenAiDocumentAnalyzer
      * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
-    public function analyzeMsaImagesPageByPage(array $imagePaths, array $textParcels = []): array
+    public function analyzeMsaImagesPageByPage(
+        array $imagePaths,
+        array $textParcels = [],
+        ?string $sourceText = null
+    ): array
     {
         $mergedParcels = [];
         $bestClassification = [
@@ -1215,7 +1326,11 @@ class OpenAiDocumentAnalyzer
             ];
         }
 
-        $baseExtraction['msa_parcels'] = $this->mergeMsaParcels($mergedParcels, $textParcels);
+        $baseExtraction['msa_parcels'] = $this->mergeMsaParcels(
+            $mergedParcels,
+            $textParcels,
+            $sourceText
+        );
 
         return [
             'classification' => [

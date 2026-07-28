@@ -199,3 +199,39 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
         ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('0A')
         ->and($result->normalizedJson['msa_parcels'][0]['numero_plan'])->toBe('1150');
 });
+
+it('recognizes MSA parcel tables containing only simple-letter sections', function () {
+    $processor = app(DocumentProcessor::class);
+
+    $method = new ReflectionMethod(
+        DocumentProcessor::class,
+        'looksLikeMsaParcelTable'
+    );
+
+    $method->setAccessible(true);
+
+    $text = <<<'TEXT'
+Loire-Atlantique - Vendée
+
+MSA44-85
+
+RELEVE D'EXPLOITATION
+
+DESIGNATION CADASTRALE DES TERRES
+IDENTIFICATION DES PARCELLES
+
+SECTION
+NUMERO PLAN
+
+DEPT COM L NUMERO PREFIXE
+
+85 151 + 00184 O A 0561 03 T
+A 0562 02 P
+
+85 198 B 00184 O A 0467 03 T
+A 0468 04 T
+B 1105 02 T
+TEXT;
+
+    expect($method->invoke($processor, $text))->toBeTrue();
+});

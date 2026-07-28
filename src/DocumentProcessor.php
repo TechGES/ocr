@@ -376,11 +376,17 @@ class DocumentProcessor
         $hasCadastralRows = preg_match('/\b\d{2}\s+\d{3}\s+[A-Z]\s+\d{4}\s+Z[A-Z0-9]\s+\d{4}\b/u', $normalized) === 1
             || preg_match('/\bZ[A-Z0-9]\s+\d{4}\b/u', $normalized) === 1;
 
-        return $hasMsaMarker
+        $hasStrongMsaTableMarkers = $hasMsaMarker
             && $hasExploitationMarker
             && $hasParcelMarker
-            && $hasPlanMarker
-            && $hasCadastralRows;
+            && $hasPlanMarker;
+
+        return $hasStrongMsaTableMarkers
+            || (
+                $hasMsaMarker
+                && $hasParcelMarker
+                && $hasCadastralRows
+            );
     }
 
     protected function configuredMaxPages(): int

@@ -30,6 +30,7 @@ class OpenAiDocumentAnalyzer
 
         $merged = [];
         $knownTextContexts = [];
+        $knownTextParcelsByOccurrence = [];
 
         foreach ($textParcels as $parcel) {
             if (! is_array($parcel)) {
@@ -71,6 +72,14 @@ class OpenAiDocumentAnalyzer
 
             $merged[$key] = $normalizedParcel;
             $knownTextContexts[$dept.'|'.$com] = true;
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey(
+                $normalizedParcel
+            );
+
+            $knownTextParcelsByOccurrence[
+                $occurrenceKey
+            ][] = $normalizedParcel;
         }
 
         /*
@@ -115,6 +124,35 @@ class OpenAiDocumentAnalyzer
 
             if (! isset($knownTextContexts[$dept.'|'.$com])) {
                 continue;
+            }
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey($parcel);
+            $textOccurrenceRows = $knownTextParcelsByOccurrence[
+                $occurrenceKey
+            ] ?? [];
+
+            if ($textOccurrenceRows !== []) {
+                $hasMatchingTextContext = false;
+
+                foreach ($textOccurrenceRows as $textOccurrenceRow) {
+                    if (
+                        trim((string) ($textOccurrenceRow['dept'] ?? ''))
+                            === $dept
+                        && trim((string) ($textOccurrenceRow['com'] ?? ''))
+                            === $com
+                    ) {
+                        $hasMatchingTextContext = true;
+                        break;
+                    }
+                }
+
+                /*
+                 * La section et le numéro existent bien dans le texte,
+                 * mais sous un autre DEPT/COM : le contexte Vision est faux.
+                 */
+                if (! $hasMatchingTextContext) {
+                    continue;
+                }
             }
 
             if (

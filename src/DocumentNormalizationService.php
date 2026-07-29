@@ -465,6 +465,18 @@ class DocumentNormalizationService
                 continue;
             }
 
+            /*
+             * Un changement isolé de commune dans le même département peut
+             * correspondre à une vraie transition cadastrale.
+             *
+             * La correction automatique est réservée aux ruptures complètes
+             * DEPT + COM, beaucoup plus caractéristiques d'un contexte OCR
+             * halluciné ou mal propagé.
+             */
+            if ($currentDept === $previousDept) {
+                continue;
+            }
+
             $currentContextKey = $currentDept.'|'.$currentCom;
 
             if (($contextCounts[$currentContextKey] ?? 0) !== 1) {

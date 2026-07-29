@@ -699,3 +699,219 @@ TEXT
         ],
     ]);
 });
+
+it('uses secondary MSA text context for reliable vision completion', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.vision_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    // Références communes aux sources.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0029'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0002'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0003'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0033'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0035'],
+
+                    // Compléments Vision absents des couches texte exploitables.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0003'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZZ', 'numero_plan' => '0004'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZZ', 'numero_plan' => '0018'],
+
+                    // Mauvais contexte Vision pour une occurrence connue.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZX', 'numero_plan' => '0023'],
+
+                    // Faux préfixe Vision sur une occurrence connue sans préfixe.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '363', 'section' => 'ZS', 'numero_plan' => '0029'],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $imagePath = tempnam(sys_get_temp_dir(), 'id3202-');
+
+    if ($imagePath === false) {
+        throw new RuntimeException('Unable to create temporary image fixture.');
+    }
+
+    file_put_contents($imagePath, 'fake-image-content');
+
+    $primaryParcels = [
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0029'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0002'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0003'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0033'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0035'],
+    ];
+
+    $secondaryParcels = [
+        ['dept' => '72', 'com' => '050', 'prefixe' => '', 'section' => 'ZX', 'numero_plan' => '0023'],
+        ...$primaryParcels,
+    ];
+
+    try {
+        $result = $analyzer->analyzeMsaImagesPageByPage(
+            [$imagePath],
+            $primaryParcels,
+            <<<'TEXT'
+72 083 C 00100 ZS 0029
+ZR 0002
+ZR 0003
+ZS 0033
+ZS 0035
+TEXT,
+            $secondaryParcels
+        );
+    } finally {
+        @unlink($imagePath);
+    }
+
+    $references = array_map(
+        static fn (array $row): string => implode('/', [
+            $row['dept'],
+            $row['com'],
+            $row['prefixe'] === '' ? '000' : $row['prefixe'],
+            $row['section'],
+            $row['numero_plan'],
+        ]),
+        $result['extraction']['msa_parcels']
+    );
+
+    sort($references);
+
+    $expected = [
+        '72/050/000/ZX/0023',
+        '72/083/000/ZR/0002',
+        '72/083/000/ZR/0003',
+        '72/083/000/ZS/0003',
+        '72/083/000/ZS/0029',
+        '72/083/000/ZS/0033',
+        '72/083/000/ZS/0035',
+        '72/083/000/ZZ/0004',
+        '72/083/000/ZZ/0018',
+    ];
+
+    sort($expected);
+
+    expect($references)->toBe($expected);
+});
+
+it('reconciles a unique secondary MSA context even when vision completion is unreliable', function () {
+    config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.openai.vision_model', 'gpt-4.1-mini');
+
+    $client = Mockery::mock(LlmClient::class);
+
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+            'confidence' => 0.99,
+            'review_reason' => '',
+            'extracted_data' => [
+                'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
+                'msa_parcels' => [
+                    // Cinq lignes confirmant le texte principal.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0029'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0002'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0003'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0033'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0035'],
+
+                    // Bonne occurrence, mauvais contexte Vision.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZX', 'numero_plan' => '0023'],
+
+                    // Bruit destiné à rendre la complétion globale non fiable.
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1001'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1002'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1003'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1004'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1005'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1006'],
+                    ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZA', 'numero_plan' => '1007'],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory
+    );
+
+    $imagePath = tempnam(sys_get_temp_dir(), 'id3202-');
+
+    if ($imagePath === false) {
+        throw new RuntimeException('Unable to create temporary image fixture.');
+    }
+
+    file_put_contents($imagePath, 'fake-image-content');
+
+    $primaryParcels = [
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0029'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0002'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZR', 'numero_plan' => '0003'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0033'],
+        ['dept' => '72', 'com' => '083', 'prefixe' => '', 'section' => 'ZS', 'numero_plan' => '0035'],
+    ];
+
+    $secondaryParcels = [
+        ['dept' => '72', 'com' => '050', 'prefixe' => '', 'section' => 'ZX', 'numero_plan' => '0023'],
+        ...$primaryParcels,
+    ];
+
+    try {
+        $result = $analyzer->analyzeMsaImagesPageByPage(
+            [$imagePath],
+            $primaryParcels,
+            <<<'TEXT'
+72 083 C 00100 ZS 0029
+ZR 0002
+ZR 0003
+ZS 0033
+ZS 0035
+TEXT,
+            $secondaryParcels
+        );
+    } finally {
+        @unlink($imagePath);
+    }
+
+    $references = array_map(
+        static fn (array $row): string => implode('/', [
+            $row['dept'],
+            $row['com'],
+            $row['prefixe'] === '' ? '000' : $row['prefixe'],
+            $row['section'],
+            $row['numero_plan'],
+        ]),
+        $result['extraction']['msa_parcels']
+    );
+
+    sort($references);
+
+    $expected = [
+        '72/050/000/ZX/0023',
+        '72/083/000/ZR/0002',
+        '72/083/000/ZR/0003',
+        '72/083/000/ZS/0029',
+        '72/083/000/ZS/0033',
+        '72/083/000/ZS/0035',
+    ];
+
+    sort($expected);
+
+    expect($references)->toBe($expected);
+});

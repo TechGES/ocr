@@ -150,7 +150,8 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
             Mockery::on(
                 fn (string $sourceText): bool =>
                     str_contains($sourceText, 'ZA 0025')
-            )
+            ),
+            []
         )
         ->andReturn([
             'classification' => [

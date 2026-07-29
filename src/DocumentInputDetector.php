@@ -11,7 +11,12 @@ class DocumentInputDetector
     ) {}
 
     /**
-     * @return array{input_type: string, pages_count: int|null, extracted_text: string|null}
+     * @return array{
+     *     input_type: string,
+     *     pages_count: int|null,
+     *     extracted_text: string|null,
+     *     extracted_text_raw: string|null
+     * }
      */
     public function detect(string $documentPath, string $mimeType): array
     {
@@ -20,6 +25,7 @@ class DocumentInputDetector
                 'input_type' => DocumentProcessingValues::INPUT_TYPE_IMAGE,
                 'pages_count' => 1,
                 'extracted_text' => null,
+                'extracted_text_raw' => null,
             ];
         }
 
@@ -32,10 +38,15 @@ class DocumentInputDetector
         $normalizedText = trim($normalizedText);
         $isTextPdf = mb_strlen(trim($normalizedText)) >= 80;
 
+        $rawText = $isTextPdf
+            ? $this->pdfTextExtractor->extractRaw($documentPath)
+            : null;
+
         return [
             'input_type' => $isTextPdf ? DocumentProcessingValues::INPUT_TYPE_PDF_TEXT : DocumentProcessingValues::INPUT_TYPE_PDF_SCAN,
             'pages_count' => $this->countPagesFromExtractedText($extractedText),
             'extracted_text' => $isTextPdf ? $extractedText : null,
+            'extracted_text_raw' => $rawText,
         ];
     }
 

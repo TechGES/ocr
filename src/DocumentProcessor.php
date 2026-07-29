@@ -44,6 +44,7 @@ class DocumentProcessor
             $detection = $this->inputDetector->detect($source->path, $source->mimeType);
             $pageCount = $detection['pages_count'];
             $extractedText = $detection['extracted_text'];
+            $secondaryExtractedText = $detection['extracted_text_raw'] ?? null;
 
             if ($detection['input_type'] === DocumentProcessingValues::INPUT_TYPE_IMAGE) {
                 $pageImages = [$source->path];
@@ -51,6 +52,13 @@ class DocumentProcessor
 
             if ($detection['input_type'] === DocumentProcessingValues::INPUT_TYPE_PDF_TEXT && is_string($extractedText)) {
                 $extractedText = $this->limitTextToPages($extractedText, $maxPages);
+
+                if (is_string($secondaryExtractedText)) {
+                    $secondaryExtractedText = $this->limitTextToPages(
+                        $secondaryExtractedText,
+                        $maxPages
+                    );
+                }
             }
 
             if (
@@ -63,10 +71,17 @@ class DocumentProcessor
 
                 $textParcels = $this->openAiDocumentAnalyzer->extractMsaTextParcels((string) $extractedText);
 
+                $secondaryTextParcels = is_string($secondaryExtractedText)
+                    ? $this->openAiDocumentAnalyzer->extractMsaTextParcels(
+                        $secondaryExtractedText
+                    )
+                    : [];
+
                 $analysis = $this->openAiDocumentAnalyzer->analyzeMsaImagesPageByPage(
                     $pageImages,
                     $textParcels,
-                    (string) $extractedText
+                    (string) $extractedText,
+                    $secondaryTextParcels
                 );
 
                 $classification = $analysis['classification'];

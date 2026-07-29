@@ -599,3 +599,91 @@ it('keeps homonymous MSA parcels that differ only by prefix', function () {
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('keeps a valid isolated MSA commune confirmed by a distinct parcel occurrence', function () {
+    $service = app(DocumentNormalizationService::class);
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0029',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZR',
+                    'numero_plan' => '0002',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZR',
+                    'numero_plan' => '0003',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0033',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '050',
+                    'prefixe' => '',
+                    'section' => 'ZX',
+                    'numero_plan' => '0023',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZZ',
+                    'numero_plan' => '0004',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZZ',
+                    'numero_plan' => '0018',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0003',
+                ],
+            ],
+        ]
+    );
+
+    $references = array_map(
+        static fn (array $row): string => implode('/', [
+            $row['dept'],
+            $row['com'],
+            $row['prefixe'] === '' ? '000' : $row['prefixe'],
+            $row['section'],
+            $row['numero_plan'],
+        ]),
+        $result['normalized']['msa_parcels']
+    );
+
+    expect($references)->toContain(
+        '72/050/000/ZX/0023'
+    );
+
+    expect($references)->not->toContain(
+        '72/083/000/ZX/0023'
+    );
+});

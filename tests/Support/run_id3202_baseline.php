@@ -294,6 +294,7 @@ try {
             );
 
             $payload = [
+                'ocr_version' => $result->ocrVersion,
                 'input_type' => $result->inputType,
                 'document_type' => $result->documentType,
                 'status' => $result->status,

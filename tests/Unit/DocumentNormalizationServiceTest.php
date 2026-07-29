@@ -687,3 +687,150 @@ it('keeps a valid isolated MSA commune confirmed by a distinct parcel occurrence
         '72/083/000/ZX/0023'
     );
 });
+
+it('keeps an isolated explicit MSA prefix in a distinct cadastral context', function () {
+    $service = new DocumentNormalizationService;
+
+    $parcels = [];
+
+    /*
+     * Préfixe dominant dans un autre contexte cadastral.
+     */
+    for ($index = 1; $index <= 20; $index++) {
+        $parcels[] = [
+            'dept' => '72',
+            'com' => '025',
+            'prefixe' => '108',
+            'section' => 'ZC',
+            'numero_plan' => str_pad(
+                (string) $index,
+                4,
+                '0',
+                STR_PAD_LEFT
+            ),
+        ];
+    }
+
+    /*
+     * Préfixe minoritaire, mais unique et explicite dans son propre
+     * contexte DEPT/COM. Il ne doit pas être effacé uniquement parce
+     * qu'un autre préfixe domine le document.
+     */
+    $parcels[] = [
+        'dept' => '49',
+        'com' => '018',
+        'prefixe' => '143',
+        'section' => 'ZE',
+        'numero_plan' => '0114',
+    ];
+
+    /*
+     * Présence d'une ligne sans préfixe afin d'activer le nettoyage
+     * des préfixes minoritaires.
+     */
+    $parcels[] = [
+        'dept' => '72',
+        'com' => '154',
+        'prefixe' => '',
+        'section' => 'YT',
+        'numero_plan' => '0001',
+    ];
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => $parcels,
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '018'
+            && ($row['section'] ?? '') === 'ZE'
+            && ($row['numero_plan'] ?? '') === '0114'
+    ));
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '018',
+            'prefixe' => '143',
+            'section' => 'ZE',
+            'numero_plan' => '0114',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('drops a prefix-equals-commune duplicate when the exact unprefixed parcel exists', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'CO',
+                    'numero_plan' => '0216',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '099',
+                    'section' => 'CO',
+                    'numero_plan' => '0216',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'EM',
+                    'numero_plan' => '0126',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'ZD',
+                    'numero_plan' => '0044',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'ZA',
+                    'numero_plan' => '0001',
+                ],
+            ],
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '099'
+            && ($row['section'] ?? '') === 'CO'
+            && ($row['numero_plan'] ?? '') === '0216'
+    ));
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '099',
+            'prefixe' => '',
+            'section' => 'CO',
+            'numero_plan' => '0216',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});

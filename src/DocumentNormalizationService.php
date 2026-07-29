@@ -1106,6 +1106,7 @@ class DocumentNormalizationService
 
         $maxMinorPrefixCount = max(2, (int) ceil(count($rows) * 0.10));
 
+        $contextCounts = [];
         $contextPrefixCounts = [];
 
         foreach ($rows as $row) {
@@ -1113,18 +1114,27 @@ class DocumentNormalizationService
             $com = (string) ($row['com'] ?? '');
             $prefix = (string) ($row['prefixe'] ?? '');
 
-            if ($dept === '' || $com === '' || $prefix === '') {
+            if ($dept === '' || $com === '') {
                 continue;
             }
 
             $contextKey = $dept.'|'.$com;
-            $contextPrefixCounts[$contextKey][$prefix] = ($contextPrefixCounts[$contextKey][$prefix] ?? 0) + 1;
+            $contextCounts[$contextKey] =
+                ($contextCounts[$contextKey] ?? 0) + 1;
+
+            if ($prefix === '') {
+                continue;
+            }
+
+            $contextPrefixCounts[$contextKey][$prefix] =
+                ($contextPrefixCounts[$contextKey][$prefix] ?? 0) + 1;
         }
 
         return array_map(static function (array $row) use (
             $dominantNonEmptyPrefix,
             $prefixCounts,
             $maxMinorPrefixCount,
+            $contextCounts,
             $contextPrefixCounts
         ): array {
             $prefix = (string) ($row['prefixe'] ?? '');
@@ -1136,7 +1146,21 @@ class DocumentNormalizationService
             $dept = (string) ($row['dept'] ?? '');
             $com = (string) ($row['com'] ?? '');
             $contextKey = $dept.'|'.$com;
-            $contextPrefixCount = $contextPrefixCounts[$contextKey][$prefix] ?? 0;
+            $contextCount = $contextCounts[$contextKey] ?? 0;
+            $contextPrefixCount =
+                $contextPrefixCounts[$contextKey][$prefix] ?? 0;
+
+            /*
+             * Un contexte cadastral isolé peut légitimement porter son
+             * propre préfixe explicite. Il ne doit pas être écrasé par
+             * le préfixe dominant d'un autre DEPT/COM.
+             *
+             * COM = PREFIXE reste exclu : cette forme sert aussi de ligne
+             * support OCR et est réconciliée ensuite.
+             */
+            if ($contextCount === 1 && $prefix !== $com) {
+                return $row;
+            }
 
             // Ne pas vider un préfixe minoritaire globalement s'il est confirmé
             // plusieurs fois dans son propre contexte dept/com.
@@ -1373,7 +1397,24 @@ class DocumentNormalizationService
             $availablePrefixes = array_keys($prefixes);
 
             if (in_array('', $availablePrefixes, true)) {
-                [$dept, $com, $section, $numeroPlan] = explode('|', $exactWithoutPrefixKey);
+                [$dept, $com, $section, $numeroPlan] = explode(
+                    '|',
+                    $exactWithoutPrefixKey
+                );
+
+                /*
+                 * Lorsque la même parcelle existe sans préfixe et avec
+                 * un préfixe identique au code commune, la variante
+                 * préfixée est une duplication de contexte OCR, pas une
+                 * parcelle cadastrale distincte.
+                 */
+                if (in_array($com, $availablePrefixes, true)) {
+                    $preferredPrefixByExactParcel[
+                        $exactWithoutPrefixKey
+                    ] = '';
+
+                    continue;
+                }
 
                 $sectionKey = $dept.'|'.$com.'|'.$section;
                 $contextKey = $dept.'|'.$com;

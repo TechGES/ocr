@@ -517,3 +517,449 @@ it('keeps a rare MSA prefix when it is confirmed by the same cadastral context',
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('keeps homonymous MSA parcels that differ only by prefix', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '',
+                    'section' => 'B',
+                    'numero_plan' => '1123',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1123',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1101',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '043',
+                    'section' => 'B',
+                    'numero_plan' => '1102',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '367',
+                    'prefixe' => '',
+                    'section' => 'ZK',
+                    'numero_plan' => '0001',
+                ],
+            ],
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '367'
+            && ($row['section'] ?? '') === '0B'
+            && ($row['numero_plan'] ?? '') === '1123'
+    ));
+
+    usort(
+        $targetRows,
+        static fn (array $left, array $right): int =>
+            ($left['prefixe'] ?? '') <=> ($right['prefixe'] ?? '')
+    );
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '1123',
+        ],
+        [
+            'dept' => '49',
+            'com' => '367',
+            'prefixe' => '043',
+            'section' => '0B',
+            'numero_plan' => '1123',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('keeps a valid isolated MSA commune confirmed by a distinct parcel occurrence', function () {
+    $service = app(DocumentNormalizationService::class);
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'document_type' => DocumentProcessing::BUSINESS_TYPE_MSA,
+            'msa_parcels' => [
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0029',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZR',
+                    'numero_plan' => '0002',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZR',
+                    'numero_plan' => '0003',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0033',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '050',
+                    'prefixe' => '',
+                    'section' => 'ZX',
+                    'numero_plan' => '0023',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZZ',
+                    'numero_plan' => '0004',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZZ',
+                    'numero_plan' => '0018',
+                ],
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0003',
+                ],
+            ],
+        ]
+    );
+
+    $references = array_map(
+        static fn (array $row): string => implode('/', [
+            $row['dept'],
+            $row['com'],
+            $row['prefixe'] === '' ? '000' : $row['prefixe'],
+            $row['section'],
+            $row['numero_plan'],
+        ]),
+        $result['normalized']['msa_parcels']
+    );
+
+    expect($references)->toContain(
+        '72/050/000/ZX/0023'
+    );
+
+    expect($references)->not->toContain(
+        '72/083/000/ZX/0023'
+    );
+});
+
+it('keeps an isolated explicit MSA prefix in a distinct cadastral context', function () {
+    $service = new DocumentNormalizationService;
+
+    $parcels = [];
+
+    /*
+     * Préfixe dominant dans un autre contexte cadastral.
+     */
+    for ($index = 1; $index <= 20; $index++) {
+        $parcels[] = [
+            'dept' => '72',
+            'com' => '025',
+            'prefixe' => '108',
+            'section' => 'ZC',
+            'numero_plan' => str_pad(
+                (string) $index,
+                4,
+                '0',
+                STR_PAD_LEFT
+            ),
+        ];
+    }
+
+    /*
+     * Préfixe minoritaire, mais unique et explicite dans son propre
+     * contexte DEPT/COM. Il ne doit pas être effacé uniquement parce
+     * qu'un autre préfixe domine le document.
+     */
+    $parcels[] = [
+        'dept' => '49',
+        'com' => '018',
+        'prefixe' => '143',
+        'section' => 'ZE',
+        'numero_plan' => '0114',
+    ];
+
+    /*
+     * Présence d'une ligne sans préfixe afin d'activer le nettoyage
+     * des préfixes minoritaires.
+     */
+    $parcels[] = [
+        'dept' => '72',
+        'com' => '154',
+        'prefixe' => '',
+        'section' => 'YT',
+        'numero_plan' => '0001',
+    ];
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => $parcels,
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '018'
+            && ($row['section'] ?? '') === 'ZE'
+            && ($row['numero_plan'] ?? '') === '0114'
+    ));
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '018',
+            'prefixe' => '143',
+            'section' => 'ZE',
+            'numero_plan' => '0114',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('drops a prefix-equals-commune duplicate when the exact unprefixed parcel exists', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'CO',
+                    'numero_plan' => '0216',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '099',
+                    'section' => 'CO',
+                    'numero_plan' => '0216',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'EM',
+                    'numero_plan' => '0126',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'ZD',
+                    'numero_plan' => '0044',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '099',
+                    'prefixe' => '',
+                    'section' => 'ZA',
+                    'numero_plan' => '0001',
+                ],
+            ],
+        ]
+    );
+
+    $targetRows = array_values(array_filter(
+        $result['normalized']['msa_parcels'],
+        static fn (array $row): bool =>
+            ($row['dept'] ?? '') === '49'
+            && ($row['com'] ?? '') === '099'
+            && ($row['section'] ?? '') === 'CO'
+            && ($row['numero_plan'] ?? '') === '0216'
+    ));
+
+    expect($targetRows)->toBe([
+        [
+            'dept' => '49',
+            'com' => '099',
+            'prefixe' => '',
+            'section' => 'CO',
+            'numero_plan' => '0216',
+        ],
+    ]);
+
+    expect($result['needs_review'])->toBeFalse();
+    expect($result['errors'])->toBe([]);
+});
+
+it('clears MSA prefixes copied from plan numbers when the anomaly repeats in one cadastral context', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '185',
+                    'section' => '0B',
+                    'numero_plan' => '0185',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '186',
+                    'section' => '0B',
+                    'numero_plan' => '0186',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '114',
+                    'section' => '0B',
+                    'numero_plan' => '1145',
+                ],
+            ],
+        ]
+    );
+
+    expect($result['normalized']['msa_parcels'])->toBe([
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '0185',
+        ],
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '0186',
+        ],
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '1145',
+        ],
+    ]);
+});
+
+it('keeps an isolated explicit MSA prefix that happens to match part of its plan number', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '038',
+                    'section' => '0F',
+                    'numero_plan' => '0385',
+                ],
+            ],
+        ]
+    );
+
+    expect($result['normalized']['msa_parcels'])->toBe([
+        [
+            'dept' => '49',
+            'com' => '183',
+            'prefixe' => '038',
+            'section' => '0F',
+            'numero_plan' => '0385',
+        ],
+    ]);
+});
+
+it('does not combine number-derived MSA prefix evidence across cadastral contexts', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '038',
+                    'section' => '0F',
+                    'numero_plan' => '0385',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '052',
+                    'section' => '0F',
+                    'numero_plan' => '0525',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '185',
+                    'section' => '0B',
+                    'numero_plan' => '0185',
+                ],
+            ],
+        ]
+    );
+
+    expect(array_map(
+        static fn (array $row): string =>
+            (string) $row['prefixe'],
+        $result['normalized']['msa_parcels']
+    ))->toBe([
+        '038',
+        '052',
+        '185',
+    ]);
+});

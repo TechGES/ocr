@@ -465,6 +465,18 @@ class DocumentNormalizationService
                 continue;
             }
 
+            /*
+             * Un changement isolé de commune dans le même département peut
+             * correspondre à une vraie transition cadastrale.
+             *
+             * La correction automatique est réservée aux ruptures complètes
+             * DEPT + COM, beaucoup plus caractéristiques d'un contexte OCR
+             * halluciné ou mal propagé.
+             */
+            if ($currentDept === $previousDept) {
+                continue;
+            }
+
             $currentContextKey = $currentDept.'|'.$currentCom;
 
             if (($contextCounts[$currentContextKey] ?? 0) !== 1) {
@@ -550,6 +562,7 @@ class DocumentNormalizationService
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
         $rows = $this->normalizeMsaIsolatedContextOutliers($rows);
         $rows = $this->normalizeSuspiciousMsaPrefixes($rows);
+        $rows = $this->normalizeMsaPrefixesDerivedFromPlanNumbers($rows);
         $rows = $this->normalizeMsaPrefixConflicts($rows);
         $rows = $this->normalizeSuspiciousTruncatedMsaPlanNumbers($rows);
 
@@ -1094,6 +1107,7 @@ class DocumentNormalizationService
 
         $maxMinorPrefixCount = max(2, (int) ceil(count($rows) * 0.10));
 
+        $contextCounts = [];
         $contextPrefixCounts = [];
 
         foreach ($rows as $row) {
@@ -1101,18 +1115,27 @@ class DocumentNormalizationService
             $com = (string) ($row['com'] ?? '');
             $prefix = (string) ($row['prefixe'] ?? '');
 
-            if ($dept === '' || $com === '' || $prefix === '') {
+            if ($dept === '' || $com === '') {
                 continue;
             }
 
             $contextKey = $dept.'|'.$com;
-            $contextPrefixCounts[$contextKey][$prefix] = ($contextPrefixCounts[$contextKey][$prefix] ?? 0) + 1;
+            $contextCounts[$contextKey] =
+                ($contextCounts[$contextKey] ?? 0) + 1;
+
+            if ($prefix === '') {
+                continue;
+            }
+
+            $contextPrefixCounts[$contextKey][$prefix] =
+                ($contextPrefixCounts[$contextKey][$prefix] ?? 0) + 1;
         }
 
         return array_map(static function (array $row) use (
             $dominantNonEmptyPrefix,
             $prefixCounts,
             $maxMinorPrefixCount,
+            $contextCounts,
             $contextPrefixCounts
         ): array {
             $prefix = (string) ($row['prefixe'] ?? '');
@@ -1124,7 +1147,21 @@ class DocumentNormalizationService
             $dept = (string) ($row['dept'] ?? '');
             $com = (string) ($row['com'] ?? '');
             $contextKey = $dept.'|'.$com;
-            $contextPrefixCount = $contextPrefixCounts[$contextKey][$prefix] ?? 0;
+            $contextCount = $contextCounts[$contextKey] ?? 0;
+            $contextPrefixCount =
+                $contextPrefixCounts[$contextKey][$prefix] ?? 0;
+
+            /*
+             * Un contexte cadastral isolé peut légitimement porter son
+             * propre préfixe explicite. Il ne doit pas être écrasé par
+             * le préfixe dominant d'un autre DEPT/COM.
+             *
+             * COM = PREFIXE reste exclu : cette forme sert aussi de ligne
+             * support OCR et est réconciliée ensuite.
+             */
+            if ($contextCount === 1 && $prefix !== $com) {
+                return $row;
+            }
 
             // Ne pas vider un préfixe minoritaire globalement s'il est confirmé
             // plusieurs fois dans son propre contexte dept/com.
@@ -1140,6 +1177,111 @@ class DocumentNormalizationService
 
             return $row;
         }, $rows);
+    }
+
+    /**
+     * Clears OCR prefixes copied from their own plan number when the same
+     * anomaly is confirmed by several distinct prefixes in one cadastral
+     * department/commune context.
+     *
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaPrefixesDerivedFromPlanNumbers(array $rows): array
+    {
+        $derivedPrefixesByContext = [];
+
+        foreach ($rows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if (
+                $dept === ''
+                || $com === ''
+                || ! $this->isMsaPrefixDerivedFromPlanNumber(
+                    $prefixe,
+                    $numeroPlan
+                )
+            ) {
+                continue;
+            }
+
+            $contextKey = $dept.'|'.$com;
+
+            $derivedPrefixesByContext[
+                $contextKey
+            ][$prefixe] = true;
+        }
+
+        $contextsToNormalize = [];
+
+        foreach (
+            $derivedPrefixesByContext
+            as $contextKey => $prefixes
+        ) {
+            /*
+             * A single coincidence is not enough to alter an explicit
+             * cadastral prefix.
+             *
+             * Three distinct prefixes, each copied from its own plan
+             * number in the same DEPT/COM context, identify a systematic
+             * OCR column shift.
+             */
+            if (count($prefixes) >= 3) {
+                $contextsToNormalize[$contextKey] = true;
+            }
+        }
+
+        if ($contextsToNormalize === []) {
+            return $rows;
+        }
+
+        return array_map(
+            function (array $row) use (
+                $contextsToNormalize
+            ): array {
+                $dept = (string) ($row['dept'] ?? '');
+                $com = (string) ($row['com'] ?? '');
+                $prefixe = (string) ($row['prefixe'] ?? '');
+                $numeroPlan = (string) (
+                    $row['numero_plan'] ?? ''
+                );
+
+                $contextKey = $dept.'|'.$com;
+
+                if (
+                    isset($contextsToNormalize[$contextKey])
+                    && $this->isMsaPrefixDerivedFromPlanNumber(
+                        $prefixe,
+                        $numeroPlan
+                    )
+                ) {
+                    $row['prefixe'] = '';
+                }
+
+                return $row;
+            },
+            $rows
+        );
+    }
+
+    private function isMsaPrefixDerivedFromPlanNumber(
+        string $prefixe,
+        string $numeroPlan
+    ): bool {
+        if (
+            $prefixe === ''
+            || $prefixe === '000'
+            || preg_match('/^\d{3}$/', $prefixe) !== 1
+            || preg_match('/^\d{4}$/', $numeroPlan) !== 1
+        ) {
+            return false;
+        }
+
+        return $prefixe === substr($numeroPlan, 0, 3)
+            || $prefixe === substr($numeroPlan, -3);
     }
 
     /**
@@ -1361,7 +1503,54 @@ class DocumentNormalizationService
             $availablePrefixes = array_keys($prefixes);
 
             if (in_array('', $availablePrefixes, true)) {
-                $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                [$dept, $com, $section, $numeroPlan] = explode(
+                    '|',
+                    $exactWithoutPrefixKey
+                );
+
+                /*
+                 * Lorsque la même parcelle existe sans préfixe et avec
+                 * un préfixe identique au code commune, la variante
+                 * préfixée est une duplication de contexte OCR, pas une
+                 * parcelle cadastrale distincte.
+                 */
+                if (in_array($com, $availablePrefixes, true)) {
+                    $preferredPrefixByExactParcel[
+                        $exactWithoutPrefixKey
+                    ] = '';
+
+                    continue;
+                }
+
+                $sectionKey = $dept.'|'.$com.'|'.$section;
+                $contextKey = $dept.'|'.$com;
+                $hasConfirmedExplicitPrefix = false;
+
+                foreach ($availablePrefixes as $candidatePrefix) {
+                    if ($candidatePrefix === '') {
+                        continue;
+                    }
+
+                    $sectionPrefixCount = $sectionPrefixCounts[$sectionKey][$candidatePrefix] ?? 0;
+                    $contextPrefixCount = $contextPrefixCounts[$contextKey][$candidatePrefix] ?? 0;
+                    $hintKey = $dept.'|'.$section.'|'.$numeroPlan;
+
+                    if (
+                        $sectionPrefixCount >= 2
+                        || $contextPrefixCount >= 2
+                        || isset($prefixHints[$hintKey])
+                    ) {
+                        $hasConfirmedExplicitPrefix = true;
+                        break;
+                    }
+                }
+
+                // Une variante vide et une variante préfixée confirmée peuvent
+                // représenter deux parcelles cadastrales distinctes.
+                if (! $hasConfirmedExplicitPrefix) {
+                    $preferredPrefixByExactParcel[$exactWithoutPrefixKey] = '';
+                }
+
                 continue;
             }
 
@@ -1459,11 +1648,14 @@ class DocumentNormalizationService
             $availableExactPrefixes = array_keys($prefixesByExactParcelWithoutPrefix[$exactWithoutPrefixKey] ?? []);
             $hasExactEmptyVariant = in_array('', $availableExactPrefixes, true);
 
-            // Si la même parcelle existe avec prefixe vide et prefixe non vide sur le même dept/com,
-            // on garde la version vide, sauf si le prefixe a été confirmé par une ligne support.
+            // Si la même parcelle existe avec préfixe vide et préfixe non vide,
+            // supprimer uniquement la variante préfixée isolée.
+            // Une variante confirmée dans son contexte reste une parcelle distincte.
             if (
                 $prefixe !== ''
                 && $hasExactEmptyVariant
+                && $sectionPrefixCount < 2
+                && $contextPrefixCount < 2
                 && ! isset($prefixHints[$dept.'|'.$section.'|'.$numeroPlan])
             ) {
                 continue;

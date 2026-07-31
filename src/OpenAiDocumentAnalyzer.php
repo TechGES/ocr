@@ -18,89 +18,327 @@ class OpenAiDocumentAnalyzer
      * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
      * @return array<int, mixed>
      */
-    private function mergeMsaParcels(array $llmParcels, array $textParcels): array
+    private function mergeMsaParcels(
+        array $llmParcels,
+        array $textParcels,
+        ?string $sourceText = null,
+        array $secondaryTextParcels = []
+    ): array
     {
-        $llmParcels = $this->filterSuspiciousMsaLlmParcels($llmParcels);
+        $llmParcels = $this->filterSuspiciousMsaLlmParcels(
+            $llmParcels
+        );
 
-        if ($textParcels !== []) {
-            $deduplicated = [];
+        $normalizedLlmParcels = [];
 
-            foreach ($textParcels as $parcel) {
-                if (! is_array($parcel)) {
-                    continue;
-                }
-
-                $dept = trim((string) ($parcel['dept'] ?? ''));
-                $com = trim((string) ($parcel['com'] ?? ''));
-                $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
-                $section = mb_strtoupper(trim((string) ($parcel['section'] ?? '')));
-                $numeroPlan = trim((string) ($parcel['numero_plan'] ?? ''));
-
-                if ($prefixe === '000') {
-                    $prefixe = '';
-                }
-
-                if (
-                    $dept === ''
-                    || $com === ''
-                    || $section === ''
-                    || $numeroPlan === ''
-                ) {
-                    continue;
-                }
-
-                $normalizedParcel = [
-                    'dept' => $dept,
-                    'com' => $com,
-                    'prefixe' => $prefixe,
-                    'section' => $section,
-                    'numero_plan' => $numeroPlan,
-                ];
-
-                $key = implode('|', $normalizedParcel);
-                $deduplicated[$key] = $normalizedParcel;
-            }
-
-            return array_values($deduplicated);
-        }
-
-        if ($llmParcels === []) {
-            return array_values($textParcels);
-        }
-
-        if ($textParcels === []) {
-            return array_values($llmParcels);
-        }
-
-        $merged = [];
-        $seen = [];
-
-        foreach (array_merge($llmParcels, $textParcels) as $parcel) {
+        foreach ($llmParcels as $parcel) {
             if (! is_array($parcel)) {
                 continue;
             }
 
-            $dept = (string) ($parcel['dept'] ?? '');
-            $com = (string) ($parcel['com'] ?? '');
-            $prefixe = (string) ($parcel['prefixe'] ?? '');
-            $section = (string) ($parcel['section'] ?? '');
-            $numeroPlan = (string) ($parcel['numero_plan'] ?? '');
+            $normalizedParcel = $this->normalizeTrustedMsaLlmParcel(
+                $parcel
+            );
 
-            if ($dept === '' || $com === '' || $section === '' || $numeroPlan === '') {
+            if ($normalizedParcel === null) {
                 continue;
             }
 
-            $key = $dept.'|'.$com.'|'.$prefixe.'|'.$section.'|'.$numeroPlan;
-
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $merged[] = $parcel;
+            $normalizedLlmParcels[
+                $this->msaParcelKey($normalizedParcel)
+            ] = $normalizedParcel;
         }
 
-        return $this->removeConflictingMsaPrefixes($merged, $textParcels);
+        $merged = [];
+        $knownTextContexts = [];
+        $knownTextParcelsByOccurrence = [];
+        $secondaryTextParcelsByOccurrence = [];
+        $knownTextParcelKeys = [];
+
+        foreach ($textParcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+            $prefixe = trim((string) ($parcel['prefixe'] ?? ''));
+            $section = mb_strtoupper(
+                trim((string) ($parcel['section'] ?? ''))
+            );
+            $numeroPlan = trim(
+                (string) ($parcel['numero_plan'] ?? '')
+            );
+
+            if ($prefixe === '000') {
+                $prefixe = '';
+            }
+
+            if (
+                $dept === ''
+                || $com === ''
+                || $section === ''
+                || $numeroPlan === ''
+            ) {
+                continue;
+            }
+
+            $normalizedParcel = [
+                'dept' => $dept,
+                'com' => $com,
+                'prefixe' => $prefixe,
+                'section' => $section,
+                'numero_plan' => $numeroPlan,
+            ];
+
+            $key = $this->msaParcelKey($normalizedParcel);
+
+            $merged[$key] = $normalizedParcel;
+            $knownTextParcelKeys[$key] = true;
+            $knownTextContexts[$dept.'|'.$com] = true;
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey(
+                $normalizedParcel
+            );
+
+            $knownTextParcelsByOccurrence[
+                $occurrenceKey
+            ][] = $normalizedParcel;
+        }
+
+        /*
+         * Le second mode pdftotext sert uniquement d'indice :
+         * ses lignes ne sont pas ajoutées directement au résultat.
+         */
+        foreach ($secondaryTextParcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $normalizedParcel = $this->normalizeTrustedMsaLlmParcel(
+                $parcel
+            );
+
+            if ($normalizedParcel === null) {
+                continue;
+            }
+
+            $key = $this->msaParcelKey($normalizedParcel);
+            $knownTextParcelKeys[$key] = true;
+
+            $dept = $normalizedParcel['dept'];
+            $com = $normalizedParcel['com'];
+
+            $knownTextContexts[$dept.'|'.$com] = true;
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey(
+                $normalizedParcel
+            );
+
+            $knownTextParcelsByOccurrence[
+                $occurrenceKey
+            ][] = $normalizedParcel;
+
+            $secondaryTextParcelsByOccurrence[
+                $occurrenceKey
+            ][] = $normalizedParcel;
+        }
+
+        $matchingTextKeys = array_intersect_key(
+            $knownTextParcelKeys,
+            $normalizedLlmParcels
+        );
+
+        $knownTextCount = count($knownTextParcelKeys);
+        $llmCount = count($normalizedLlmParcels);
+
+        $agreementRatio = $knownTextCount > 0
+            ? count($matchingTextKeys) / $knownTextCount
+            : 0.0;
+
+        $textCoverageRatio = $llmCount > 0
+            ? $knownTextCount / $llmCount
+            : 0.0;
+
+        /*
+         * Autoriser quelques compléments Vision non lisibles dans le texte
+         * uniquement lorsque Vision confirme presque toutes les références
+         * textuelles, mais que le texte reste manifestement incomplet.
+         *
+         * Cela couvre les scans OCR dégradés comme 1252, sans réouvrir les
+         * faux positifs des documents déjà couverts à plus de 90 % comme 723.
+         */
+        $allowReliableVisionCompletion = $knownTextCount >= 5
+            && $llmCount > $knownTextCount
+            && $agreementRatio >= 0.8
+            && $textCoverageRatio >= 0.5
+            && $textCoverageRatio < 0.9;
+
+        /*
+         * Sans source textuelle déterministe exploitable,
+         * conserver les lignes structurées valides fournies
+         * par l’analyse visuelle.
+         */
+        if ($merged === [] && $knownTextParcelKeys === []) {
+            foreach ($normalizedLlmParcels as $parcel) {
+                if (! is_array($parcel)) {
+                    continue;
+                }
+
+                $key = $this->msaParcelKey($parcel);
+
+                if ($key === '....') {
+                    continue;
+                }
+
+                $merged[$key] = $parcel;
+            }
+
+            return array_values($merged);
+        }
+
+        /*
+         * Lorsque le texte fournit déjà des parcelles,
+         * OpenAI peut uniquement compléter un contexte
+         * DEPT/COM confirmé par cette source déterministe.
+         *
+         * Le préfixe fait partie de la clé cadastrale :
+         * une variante vide et une variante explicitement
+         * préfixée restent donc deux parcelles distinctes.
+         */
+        foreach ($normalizedLlmParcels as $parcel) {
+            if (! is_array($parcel)) {
+                continue;
+            }
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey($parcel);
+
+            /*
+             * Lorsque Vision lit correctement SECTION/NUMERO mais rattache
+             * l'occurrence au mauvais DEPT/COM, utiliser le contexte unique
+             * fourni par le texte secondaire.
+             *
+             * Cette correction est réservée aux réponses Vision dont l'accord
+             * global avec les couches texte a déjà été jugé suffisamment fiable.
+             */
+            $secondaryOccurrenceRows =
+                $secondaryTextParcelsByOccurrence[$occurrenceKey] ?? [];
+
+            $secondaryContexts = [];
+
+            foreach ($secondaryOccurrenceRows as $secondaryRow) {
+                $secondaryDept = trim(
+                    (string) ($secondaryRow['dept'] ?? '')
+                );
+                $secondaryCom = trim(
+                    (string) ($secondaryRow['com'] ?? '')
+                );
+
+                if ($secondaryDept === '' || $secondaryCom === '') {
+                    continue;
+                }
+
+                $secondaryContexts[
+                    $secondaryDept.'|'.$secondaryCom
+                ] = [
+                    'dept' => $secondaryDept,
+                    'com' => $secondaryCom,
+                ];
+            }
+
+            /*
+             * La réconciliation d'une occurrence déjà reconnue n'est pas
+             * une complétion Vision : elle corrige seulement son DEPT/COM
+             * à partir d'un contexte textuel secondaire unique.
+             */
+            if (count($secondaryContexts) === 1) {
+                $secondaryContext = reset($secondaryContexts);
+
+                $parcel['dept'] = $secondaryContext['dept'];
+                $parcel['com'] = $secondaryContext['com'];
+            }
+
+            $dept = trim((string) ($parcel['dept'] ?? ''));
+            $com = trim((string) ($parcel['com'] ?? ''));
+
+            if (! isset($knownTextContexts[$dept.'|'.$com])) {
+                continue;
+            }
+
+            $key = $this->msaParcelKey($parcel);
+            $hasExactTextParcel = isset($knownTextParcelKeys[$key]);
+
+            $isSourceCorroborated = $sourceText !== null
+                && trim($sourceText) !== ''
+                && $this->isMsaLlmParcelCorroboratedBySourceText(
+                    $parcel,
+                    $sourceText
+                );
+
+            $occurrenceKey = $this->msaParcelOccurrenceKey($parcel);
+            $textOccurrenceRows = $knownTextParcelsByOccurrence[
+                $occurrenceKey
+            ] ?? [];
+
+            if ($textOccurrenceRows !== []) {
+                $hasMatchingTextContext = false;
+                $hasSameContextDifferentPrefix = false;
+
+                foreach ($textOccurrenceRows as $textOccurrenceRow) {
+                    if (
+                        trim((string) ($textOccurrenceRow['dept'] ?? ''))
+                            === $dept
+                        && trim((string) ($textOccurrenceRow['com'] ?? ''))
+                            === $com
+                    ) {
+                        $hasMatchingTextContext = true;
+
+                        if (
+                            trim((string) ($textOccurrenceRow['prefixe'] ?? ''))
+                            !== trim((string) ($parcel['prefixe'] ?? ''))
+                        ) {
+                            $hasSameContextDifferentPrefix = true;
+                        }
+                    }
+                }
+
+                /*
+                 * La section et le numéro existent bien dans le texte,
+                 * mais sous un autre DEPT/COM : le contexte Vision est faux.
+                 */
+                if (! $hasMatchingTextContext) {
+                    continue;
+                }
+
+                if (
+                    $hasSameContextDifferentPrefix
+                    && ! $hasExactTextParcel
+                    && $sourceText !== null
+                    && trim($sourceText) !== ''
+                    && ! $isSourceCorroborated
+                ) {
+                    continue;
+                }
+            }
+
+            if (
+                $sourceText !== null
+                && trim($sourceText) !== ''
+                && ! $isSourceCorroborated
+                && ! $hasExactTextParcel
+                && ! $allowReliableVisionCompletion
+            ) {
+                continue;
+            }
+
+            if ($key === '....' || isset($merged[$key])) {
+                continue;
+            }
+
+            $merged[$key] = $parcel;
+        }
+
+        return array_values($merged);
     }
 
     /**
@@ -888,11 +1126,7 @@ class OpenAiDocumentAnalyzer
         }
 
         if (strlen($digits) > 4) {
-            $digits = substr($digits, -4);
-        }
-
-        if (strlen($digits) === 4 && str_starts_with($digits, '4')) {
-            $digits = '0'.substr($digits, 1);
+            return '';
         }
 
         if ((int) $digits >= 5000) {
@@ -1054,7 +1288,14 @@ class OpenAiDocumentAnalyzer
             return null;
         }
 
-        if (! preg_match('/^[A-Z]{1,2}$/', $section)) {
+        if (preg_match('/^[A-Z]$/', $section) === 1) {
+            $section = '0'.$section;
+        }
+
+        if (
+            preg_match('/^(?:0[A-Z]|[A-Z]{2})$/', $section)
+            !== 1
+        ) {
             return null;
         }
 
@@ -1074,10 +1315,6 @@ class OpenAiDocumentAnalyzer
             return null;
         }
 
-        if (str_starts_with($numeroPlan, '4')) {
-            $numeroPlan = '0'.substr($numeroPlan, 1);
-        }
-
         if ((int) $numeroPlan >= 5000) {
             return null;
         }
@@ -1089,6 +1326,98 @@ class OpenAiDocumentAnalyzer
         $parcel['numero_plan'] = $numeroPlan;
 
         return $parcel;
+    }
+
+    /**
+     * Une parcelle Vision absente de l'extraction déterministe ne peut compléter
+     * le résultat que si sa section, son numéro et son éventuel préfixe sont
+     * visibles sur une même ligne du texte source.
+     *
+     * @param  array<string, mixed>  $parcel
+     */
+    private function isMsaLlmParcelCorroboratedBySourceText(
+        array $parcel,
+        string $sourceText
+    ): bool {
+        $trustedParcel = $this->normalizeTrustedMsaLlmParcel($parcel);
+
+        if ($trustedParcel === null) {
+            return false;
+        }
+
+        $expectedPrefix = trim(
+            (string) ($trustedParcel['prefixe'] ?? '')
+        );
+
+        if ($expectedPrefix === '000') {
+            $expectedPrefix = '';
+        }
+
+        $expectedSection = mb_strtoupper(
+            trim((string) ($trustedParcel['section'] ?? ''))
+        );
+
+        $expectedNumber = trim(
+            (string) ($trustedParcel['numero_plan'] ?? '')
+        );
+
+        $lines = preg_split('/\\R/u', $sourceText) ?: [];
+
+        foreach ($lines as $line) {
+            $normalizedLine = $this->normalizeMsaTextLine($line);
+
+            if ($normalizedLine === '') {
+                continue;
+            }
+
+            $tokens = preg_split('/\\s+/u', $normalizedLine) ?: [];
+
+            foreach ($tokens as $index => $token) {
+                $section = $this->normalizeMsaTextSection($token);
+
+                if ($section !== $expectedSection) {
+                    continue;
+                }
+
+                $number = $this->normalizeMsaTextNumeroPlan(
+                    $tokens[$index + 1] ?? ''
+                );
+
+                if ($number !== $expectedNumber) {
+                    continue;
+                }
+
+                $previousTokens = array_slice(
+                    $tokens,
+                    max(0, $index - 3),
+                    min(3, $index)
+                );
+
+                $explicitPrefixes = array_values(array_filter(
+                    $previousTokens,
+                    static fn (string $candidate): bool =>
+                        preg_match('/^\\d{3}$/', $candidate) === 1
+                ));
+
+                if ($expectedPrefix === '') {
+                    /*
+                     * Une référence sans préfixe est corroborée uniquement si
+                     * aucun préfixe cadastral explicite n'est placé devant elle.
+                     */
+                    if ($explicitPrefixes === []) {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                if (in_array($expectedPrefix, $explicitPrefixes, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private function looksLikeMsaTextSectionToken(string $token): bool
@@ -1150,7 +1479,12 @@ class OpenAiDocumentAnalyzer
      * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $textParcels
      * @return array{classification: array{document_type: string, confidence: float, review_reason: string}, extraction: array<string, mixed>}
      */
-    public function analyzeMsaImagesPageByPage(array $imagePaths, array $textParcels = []): array
+    public function analyzeMsaImagesPageByPage(
+        array $imagePaths,
+        array $textParcels = [],
+        ?string $sourceText = null,
+        array $secondaryTextParcels = []
+    ): array
     {
         $mergedParcels = [];
         $bestClassification = [
@@ -1194,7 +1528,12 @@ class OpenAiDocumentAnalyzer
             ];
         }
 
-        $baseExtraction['msa_parcels'] = $this->mergeMsaParcels($mergedParcels, $textParcels);
+        $baseExtraction['msa_parcels'] = $this->mergeMsaParcels(
+            $mergedParcels,
+            $textParcels,
+            $sourceText,
+            $secondaryTextParcels
+        );
 
         return [
             'classification' => [

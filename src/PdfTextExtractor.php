@@ -8,9 +8,22 @@ class PdfTextExtractor
 {
     public function extract(string $pdfPath): string
     {
+        return $this->extractWithMode($pdfPath, '-layout');
+    }
+
+    public function extractRaw(string $pdfPath): string
+    {
+        return $this->extractWithMode($pdfPath, '-raw');
+    }
+
+    private function extractWithMode(
+        string $pdfPath,
+        string $mode
+    ): string {
         $errorFile = tempnam(sys_get_temp_dir(), 'pdftotext-error-');
         $command = sprintf(
-            'pdftotext -layout %s - 2> %s',
+            'pdftotext %s %s - 2> %s',
+            $mode,
             escapeshellarg($pdfPath),
             escapeshellarg($errorFile)
         );

@@ -91,6 +91,7 @@ it('uses the one-shot openai analyzer for image inputs', function () {
 
 it('routes MSA-like text pdfs through image analysis for openai', function () {
     config()->set('ges-ocr.ai.provider', 'openai');
+    config()->set('ges-ocr.processing.cleanup_temporary_files', false);
 
     $inputDetector = Mockery::mock(DocumentInputDetector::class);
     $inputDetector->shouldReceive('detect')
@@ -139,11 +140,19 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
 
     $openAiDocumentAnalyzer->shouldReceive('analyzeMsaImagesPageByPage')
         ->once()
-        ->with(Mockery::type('array'), Mockery::on(
-            fn (array $textParcels): bool =>
-                ($textParcels[0]['section'] ?? null) === '0A'
-                && ($textParcels[0]['numero_plan'] ?? null) === '1150'
-        ))
+        ->with(
+            Mockery::type('array'),
+            Mockery::on(
+                fn (array $textParcels): bool =>
+                    ($textParcels[0]['section'] ?? null) === '0A'
+                    && ($textParcels[0]['numero_plan'] ?? null) === '1150'
+            ),
+            Mockery::on(
+                fn (string $sourceText): bool =>
+                    str_contains($sourceText, 'ZA 0025')
+            ),
+            []
+        )
         ->andReturn([
             'classification' => [
                 'document_type' => DocumentProcessingValues::BUSINESS_TYPE_MSA,
@@ -190,4 +199,40 @@ it('routes MSA-like text pdfs through image analysis for openai', function () {
         ->and($result->rawExtractionJson['msa_parcels'][0]['numero_plan'])->toBe('1150')
         ->and($result->normalizedJson['msa_parcels'][0]['section'])->toBe('0A')
         ->and($result->normalizedJson['msa_parcels'][0]['numero_plan'])->toBe('1150');
+});
+
+it('recognizes MSA parcel tables containing only simple-letter sections', function () {
+    $processor = app(DocumentProcessor::class);
+
+    $method = new ReflectionMethod(
+        DocumentProcessor::class,
+        'looksLikeMsaParcelTable'
+    );
+
+    $method->setAccessible(true);
+
+    $text = <<<'TEXT'
+Loire-Atlantique - Vendée
+
+MSA44-85
+
+RELEVE D'EXPLOITATION
+
+DESIGNATION CADASTRALE DES TERRES
+IDENTIFICATION DES PARCELLES
+
+SECTION
+NUMERO PLAN
+
+DEPT COM L NUMERO PREFIXE
+
+85 151 + 00184 O A 0561 03 T
+A 0562 02 P
+
+85 198 B 00184 O A 0467 03 T
+A 0468 04 T
+B 1105 02 T
+TEXT;
+
+    expect($method->invoke($processor, $text))->toBeTrue();
 });

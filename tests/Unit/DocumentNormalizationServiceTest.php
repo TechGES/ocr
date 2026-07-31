@@ -834,3 +834,132 @@ it('drops a prefix-equals-commune duplicate when the exact unprefixed parcel exi
     expect($result['needs_review'])->toBeFalse();
     expect($result['errors'])->toBe([]);
 });
+
+it('clears MSA prefixes copied from plan numbers when the anomaly repeats in one cadastral context', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '185',
+                    'section' => '0B',
+                    'numero_plan' => '0185',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '186',
+                    'section' => '0B',
+                    'numero_plan' => '0186',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '114',
+                    'section' => '0B',
+                    'numero_plan' => '1145',
+                ],
+            ],
+        ]
+    );
+
+    expect($result['normalized']['msa_parcels'])->toBe([
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '0185',
+        ],
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '0186',
+        ],
+        [
+            'dept' => '85',
+            'com' => '289',
+            'prefixe' => '',
+            'section' => '0B',
+            'numero_plan' => '1145',
+        ],
+    ]);
+});
+
+it('keeps an isolated explicit MSA prefix that happens to match part of its plan number', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '038',
+                    'section' => '0F',
+                    'numero_plan' => '0385',
+                ],
+            ],
+        ]
+    );
+
+    expect($result['normalized']['msa_parcels'])->toBe([
+        [
+            'dept' => '49',
+            'com' => '183',
+            'prefixe' => '038',
+            'section' => '0F',
+            'numero_plan' => '0385',
+        ],
+    ]);
+});
+
+it('does not combine number-derived MSA prefix evidence across cadastral contexts', function () {
+    $service = new \Ges\Ocr\DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        \Ges\Ocr\Support\DocumentProcessingValues::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '038',
+                    'section' => '0F',
+                    'numero_plan' => '0385',
+                ],
+                [
+                    'dept' => '49',
+                    'com' => '183',
+                    'prefixe' => '052',
+                    'section' => '0F',
+                    'numero_plan' => '0525',
+                ],
+                [
+                    'dept' => '85',
+                    'com' => '289',
+                    'prefixe' => '185',
+                    'section' => '0B',
+                    'numero_plan' => '0185',
+                ],
+            ],
+        ]
+    );
+
+    expect(array_map(
+        static fn (array $row): string =>
+            (string) $row['prefixe'],
+        $result['normalized']['msa_parcels']
+    ))->toBe([
+        '038',
+        '052',
+        '185',
+    ]);
+});

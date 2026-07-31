@@ -562,6 +562,7 @@ class DocumentNormalizationService
         $rows = $this->normalizeMsaDepartmentByCommuneContext($rows);
         $rows = $this->normalizeMsaIsolatedContextOutliers($rows);
         $rows = $this->normalizeSuspiciousMsaPrefixes($rows);
+        $rows = $this->normalizeMsaPrefixesDerivedFromPlanNumbers($rows);
         $rows = $this->normalizeMsaPrefixConflicts($rows);
         $rows = $this->normalizeSuspiciousTruncatedMsaPlanNumbers($rows);
 
@@ -1176,6 +1177,111 @@ class DocumentNormalizationService
 
             return $row;
         }, $rows);
+    }
+
+    /**
+     * Clears OCR prefixes copied from their own plan number when the same
+     * anomaly is confirmed by several distinct prefixes in one cadastral
+     * department/commune context.
+     *
+     * @param  array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>  $rows
+     * @return array<int, array{dept: string, com: string, prefixe: string, section: string, numero_plan: string}>
+     */
+    private function normalizeMsaPrefixesDerivedFromPlanNumbers(array $rows): array
+    {
+        $derivedPrefixesByContext = [];
+
+        foreach ($rows as $row) {
+            $dept = (string) ($row['dept'] ?? '');
+            $com = (string) ($row['com'] ?? '');
+            $prefixe = (string) ($row['prefixe'] ?? '');
+            $numeroPlan = (string) ($row['numero_plan'] ?? '');
+
+            if (
+                $dept === ''
+                || $com === ''
+                || ! $this->isMsaPrefixDerivedFromPlanNumber(
+                    $prefixe,
+                    $numeroPlan
+                )
+            ) {
+                continue;
+            }
+
+            $contextKey = $dept.'|'.$com;
+
+            $derivedPrefixesByContext[
+                $contextKey
+            ][$prefixe] = true;
+        }
+
+        $contextsToNormalize = [];
+
+        foreach (
+            $derivedPrefixesByContext
+            as $contextKey => $prefixes
+        ) {
+            /*
+             * A single coincidence is not enough to alter an explicit
+             * cadastral prefix.
+             *
+             * Three distinct prefixes, each copied from its own plan
+             * number in the same DEPT/COM context, identify a systematic
+             * OCR column shift.
+             */
+            if (count($prefixes) >= 3) {
+                $contextsToNormalize[$contextKey] = true;
+            }
+        }
+
+        if ($contextsToNormalize === []) {
+            return $rows;
+        }
+
+        return array_map(
+            function (array $row) use (
+                $contextsToNormalize
+            ): array {
+                $dept = (string) ($row['dept'] ?? '');
+                $com = (string) ($row['com'] ?? '');
+                $prefixe = (string) ($row['prefixe'] ?? '');
+                $numeroPlan = (string) (
+                    $row['numero_plan'] ?? ''
+                );
+
+                $contextKey = $dept.'|'.$com;
+
+                if (
+                    isset($contextsToNormalize[$contextKey])
+                    && $this->isMsaPrefixDerivedFromPlanNumber(
+                        $prefixe,
+                        $numeroPlan
+                    )
+                ) {
+                    $row['prefixe'] = '';
+                }
+
+                return $row;
+            },
+            $rows
+        );
+    }
+
+    private function isMsaPrefixDerivedFromPlanNumber(
+        string $prefixe,
+        string $numeroPlan
+    ): bool {
+        if (
+            $prefixe === ''
+            || $prefixe === '000'
+            || preg_match('/^\d{3}$/', $prefixe) !== 1
+            || preg_match('/^\d{4}$/', $numeroPlan) !== 1
+        ) {
+            return false;
+        }
+
+        return $prefixe === substr($numeroPlan, 0, 3)
+            || $prefixe === substr($numeroPlan, -3);
     }
 
     /**

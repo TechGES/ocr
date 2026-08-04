@@ -963,3 +963,97 @@ it('does not combine number-derived MSA prefix evidence across cadastral context
         '185',
     ]);
 });
+
+it('keeps multiple MSA commune blocks distinct while carrying context inside each block', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                /*
+                 * Première commune explicite.
+                 */
+                [
+                    'dept' => '72',
+                    'com' => '083',
+                    'prefixe' => '',
+                    'section' => 'ZS',
+                    'numero_plan' => '0030',
+                ],
+
+                /*
+                 * Continuation du premier bloc.
+                 */
+                [
+                    'dept' => '',
+                    'com' => '',
+                    'prefixe' => '',
+                    'section' => 'ZR',
+                    'numero_plan' => '0002',
+                ],
+
+                /*
+                 * Changement explicite de commune
+                 * au milieu du même relevé.
+                 */
+                [
+                    'dept' => '72',
+                    'com' => '050',
+                    'prefixe' => '',
+                    'section' => 'ZX',
+                    'numero_plan' => '0023',
+                ],
+
+                /*
+                 * Continuation du second bloc.
+                 */
+                [
+                    'dept' => '',
+                    'com' => '',
+                    'prefixe' => '',
+                    'section' => 'ZX',
+                    'numero_plan' => '0024',
+                ],
+            ],
+        ],
+    );
+
+    expect(
+        $result['normalized']['msa_parcels'],
+    )->toBe([
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZR',
+            'numero_plan' => '0002',
+        ],
+        [
+            'dept' => '72',
+            'com' => '050',
+            'prefixe' => '',
+            'section' => 'ZX',
+            'numero_plan' => '0023',
+        ],
+        [
+            'dept' => '72',
+            'com' => '050',
+            'prefixe' => '',
+            'section' => 'ZX',
+            'numero_plan' => '0024',
+        ],
+    ]);
+
+    expect($result['needs_review'])
+        ->toBeFalse()
+        ->and($result['errors'])
+        ->toBe([]);
+});

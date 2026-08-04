@@ -915,3 +915,185 @@ TEXT,
 
     expect($references)->toBe($expected);
 });
+
+it('updates MSA text context when the commune changes in the middle of a page', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(LlmClient::class),
+        new DocumentSchemaFactory,
+    );
+
+    $parcels =
+        $analyzer->extractMsaTextParcels(
+            <<<'TEXT'
+72 083 S 00027 ZS 0030 J 02 T
+ZR 0002 02 P
+72 050 C 00140 ZX 0023 03 T
+ZX 0024 03 T
+TEXT
+        );
+
+    expect($parcels)->toBe([
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZR',
+            'numero_plan' => '0002',
+        ],
+        [
+            'dept' => '72',
+            'com' => '050',
+            'prefixe' => '',
+            'section' => 'ZX',
+            'numero_plan' => '0023',
+        ],
+        [
+            'dept' => '72',
+            'com' => '050',
+            'prefixe' => '',
+            'section' => 'ZX',
+            'numero_plan' => '0024',
+        ],
+    ]);
+});
+
+it('keeps repeated MSA parcels followed by the cultural classification K 03 T', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(LlmClient::class),
+        new DocumentSchemaFactory,
+    );
+
+    $parcels =
+        $analyzer->extractMsaTextParcels(
+            <<<'TEXT'
+72 083 S 00027 ZS 0030 J 02 T
+ZS 0030 K 03 T
+TEXT
+        );
+
+    expect($parcels)->toBe([
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+    ]);
+});
+
+it('does not treat an owner account starting with 003 as a cadastral prefix', function () {
+    config()->set(
+        'ges-ocr.ai.provider',
+        'openai',
+    );
+
+    config()->set(
+        'ges-ocr.openai.vision_model',
+        'gpt-4.1-mini',
+    );
+
+    $client = Mockery::mock(LlmClient::class);
+
+    /*
+     * La vision propose à tort 003 comme préfixe.
+     * Dans le texte source, 00318 est uniquement
+     * le numéro de compte propriétaire.
+     */
+    $client->shouldReceive('chatStructured')
+        ->once()
+        ->andReturn([
+            'document_type' =>
+                DocumentProcessingValues::
+                    BUSINESS_TYPE_MSA,
+
+            'confidence' => 0.99,
+            'review_reason' => '',
+
+            'extracted_data' => [
+                'document_type' =>
+                    DocumentProcessingValues::
+                        BUSINESS_TYPE_MSA,
+
+                'msa_parcels' => [
+                    [
+                        'dept' => '85',
+                        'com' => '151',
+                        'prefixe' => '003',
+                        'section' => 'A',
+                        'numero_plan' => '0561',
+                    ],
+                ],
+            ],
+        ]);
+
+    $analyzer = new OpenAiDocumentAnalyzer(
+        $client,
+        new DocumentSchemaFactory,
+    );
+
+    $imagePath = tempnam(
+        sys_get_temp_dir(),
+        'id3205-',
+    );
+
+    if ($imagePath === false) {
+        throw new RuntimeException(
+            'Unable to create temporary image fixture.',
+        );
+    }
+
+    file_put_contents(
+        $imagePath,
+        'fake-image-content',
+    );
+
+    try {
+        $result =
+            $analyzer
+                ->analyzeMsaImagesPageByPage(
+                    [$imagePath],
+                    [
+                        [
+                            'dept' => '85',
+                            'com' => '151',
+                            'prefixe' => '',
+                            'section' => '0A',
+                            'numero_plan' => '0561',
+                        ],
+                    ],
+                    <<<'TEXT'
+85 151 + 00318 O A 0561 03 T
+A 0562 02 P
+TEXT
+                );
+    } finally {
+        @unlink($imagePath);
+    }
+
+    expect(
+        $result['extraction']['msa_parcels'],
+    )->toBe([
+        [
+            'dept' => '85',
+            'com' => '151',
+            'prefixe' => '',
+            'section' => '0A',
+            'numero_plan' => '0561',
+        ],
+    ]);
+});

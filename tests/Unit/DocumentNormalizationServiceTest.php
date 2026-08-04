@@ -1057,3 +1057,39 @@ it('keeps multiple MSA commune blocks distinct while carrying context inside eac
         ->and($result['errors'])
         ->toBe([]);
 });
+
+it('keeps WT as a valid MSA section', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(
+        DocumentProcessing::BUSINESS_TYPE_MSA,
+        [
+            'msa_parcels' => [
+                [
+                    'dept' => '85',
+                    'com' => '090',
+                    'prefixe' => '',
+                    'section' => 'wt',
+                    'numero_plan' => '42',
+                ],
+            ],
+        ],
+    );
+
+    expect(
+        $result['normalized']['msa_parcels'],
+    )->toBe([
+        [
+            'dept' => '85',
+            'com' => '090',
+            'prefixe' => '',
+            'section' => 'WT',
+            'numero_plan' => '0042',
+        ],
+    ]);
+
+    expect($result['needs_review'])
+        ->toBeFalse()
+        ->and($result['errors'])
+        ->toBe([]);
+});

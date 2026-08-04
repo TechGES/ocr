@@ -963,3 +963,35 @@ TEXT
         ],
     ]);
 });
+
+it('keeps repeated MSA parcels followed by the cultural classification K 03 T', function () {
+    $analyzer = new OpenAiDocumentAnalyzer(
+        Mockery::mock(LlmClient::class),
+        new DocumentSchemaFactory,
+    );
+
+    $parcels =
+        $analyzer->extractMsaTextParcels(
+            <<<'TEXT'
+72 083 S 00027 ZS 0030 J 02 T
+ZS 0030 K 03 T
+TEXT
+        );
+
+    expect($parcels)->toBe([
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+        [
+            'dept' => '72',
+            'com' => '083',
+            'prefixe' => '',
+            'section' => 'ZS',
+            'numero_plan' => '0030',
+        ],
+    ]);
+});

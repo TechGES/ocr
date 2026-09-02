@@ -5,6 +5,33 @@ declare(strict_types=1);
 use Ges\Ocr\DocumentNormalizationService;
 use Ges\Ocr\Models\DocumentProcessing;
 
+it('preserves identity usage name as a normalized name variant', function () {
+    $service = new DocumentNormalizationService;
+
+    $result = $service->normalizeAndValidate(DocumentProcessing::BUSINESS_TYPE_CIN, [
+        'first_name' => 'Jeanine Mauricette Marie-Louise',
+        'last_name' => 'BOYEAU',
+        'usage_name' => 'COLAS',
+        'date_of_birth' => '1946-01-23',
+        'place_of_birth' => 'PONTIGNE',
+        'document_number' => 'ADJDLBN12',
+        'expiry_date' => '2033-08-28',
+        'nationality' => 'FRA',
+        'sex' => 'F',
+        'mrz' => '',
+        'street_address' => '',
+        'postal_code' => '',
+        'city' => '',
+    ]);
+
+    expect($result['normalized'])->toMatchArray([
+        'document_type' => DocumentProcessing::BUSINESS_TYPE_CIN,
+        'first_name' => 'Jeanine Mauricette Marie-Louise',
+        'last_name' => 'BOYEAU',
+        'usage_name' => 'COLAS',
+    ])->and($result['normalized']['last_name'])->not->toBe($result['normalized']['usage_name']);
+});
+
 it('parses compact residence permit mrz and splits multiline address', function () {
     $service = new DocumentNormalizationService;
 

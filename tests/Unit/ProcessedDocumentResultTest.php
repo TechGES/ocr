@@ -32,10 +32,10 @@ it('exposes the OCR version in the public response without changing persistence 
     expect($result->ocrVersion)
         ->toBe(OcrVersion::CURRENT)
         ->and($result->ocrVersion)
-        ->toBe('0.4.0');
+        ->toBe('0.4.1');
 
     expect($result->toArray())->toBe([
-        'ocr_version' => '0.4.0',
+        'ocr_version' => '0.4.1',
         'input_type' => 'pdf_text',
         'document_type' => 'msa',
         'status' => 'done',

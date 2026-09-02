@@ -79,6 +79,7 @@ class DocumentNormalizationService
         $parsedMrz = $this->parseMrz($this->firstStringValue($payload, ['mrz']));
         $firstName = $this->normalizePersonNameValue($this->firstStringValue($payload, ['first_name', 'prenom']));
         $lastName = $this->normalizePersonNameValue($this->firstStringValue($payload, ['last_name', 'nom']));
+        $usageName = $this->normalizePersonNameValue($this->firstStringValue($payload, ['usage_name', 'nom_usage']));
 
         if ($lastName === '' && $parsedMrz['last_name'] !== '') {
             $lastName = $parsedMrz['last_name'];
@@ -145,6 +146,7 @@ class DocumentNormalizationService
             'civility' => $this->normalizeCinCivility($payload),
             'first_name' => $firstName,
             'last_name' => $lastName,
+            'usage_name' => $usageName,
             'date_of_birth' => $dateOfBirth,
             'place_of_birth' => $this->firstStringValue($payload, ['place_of_birth', 'lieu_naissance']),
             'document_number' => $documentNumber,
